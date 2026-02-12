@@ -1,0 +1,50 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Audio/Video files (large)
+*.mp3
+*.wav
+*.mp4
+*.m4a
+*.aac
+*.ogg
+*.flac
+
+# Output directories with generated content
+Output/audio/
+Output/Visuals Included/
+
+# Keep the structure but not the large files
+!Output/.gitkeep
+!Output/audio/.gitkeep
+!Output/Visuals Included/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Jupyter
+.ipynb_checkpoints/

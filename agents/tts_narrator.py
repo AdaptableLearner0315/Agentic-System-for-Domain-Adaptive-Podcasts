@@ -1,0 +1,347 @@
+"""
+TTS Narrator Agent
+
+Generates speech audio from text using Fal AI MiniMax Speech-01-HD.
+
+Updated for sentence-level processing:
+- Generates TTS for each sentence separately
+- Allows precise control over intensity and pauses at sentence boundaries
+- Uses MiniMax Speech-01-HD for natural documentary narrator voice
+"""
+
+import os
+import re
+import fal_client
+import requests
+from pathlib import Path
+
+# MiniMax Speech-01 configuration
+MINIMAX_VOICE_ID = "Friendly_Female_English"  # Warm, engaging narrator
+
+# Strong words that need intensity emphasis
+STRONG_WORDS = {
+    'wild', 'otherworldly', 'impossible', 'revolutionary', 'radical',
+    'volcanic', 'defy', 'defied', 'extraordinary', 'unprecedented',
+    'explosive', 'stunning', 'remarkable', 'incredible', 'triumph',
+    'breakthrough', 'decisive', 'feral', 'electric', 'volatile',
+    'dissonant', 'lightning', 'quicksilver', 'captivated', 'unheard'
+}
+
+
+def preprocess_text_for_tts(text: str) -> str:
+    """
+    Preprocess text to avoid TTS issues.
+    - Convert numbers to words
+    - Fix pronunciations (Björk -> Byerk)
+    - Handle hyphens that might cause pauses
+    """
+    # Convert number patterns
+    text = re.sub(r'\b10-year-old\b', 'ten year old', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b11\b', 'eleven', text)
+    text = re.sub(r'\b15\b', 'fifteen', text)
+    text = re.sub(r'\b1965\b', 'nineteen sixty-five', text)
+    text = re.sub(r'\b1977\b', 'nineteen seventy-seven', text)
+    text = re.sub(r'\b1980s\b', 'nineteen eighties', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b80s\b', 'eighties', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b1983\b', 'nineteen eighty-three', text)
+    text = re.sub(r'\b1986\b', 'nineteen eighty-six', text)
+    text = re.sub(r'\b1988\b', 'nineteen eighty-eight', text)
+    text = re.sub(r'\b1992\b', 'nineteen ninety-two', text)
+    text = re.sub(r'\b1993\b', 'nineteen ninety-three', text)
+
+    # Fix Björk pronunciation
+    text = text.replace('Björk', 'Byerk')
+    text = text.replace('björk', 'byerk')
+    text = text.replace('Bjork', 'Byerk')
+    text = text.replace('Byork', 'Byerk')
+
+    # Fix other Icelandic names
+    text = text.replace('Gudmundsdottir', 'Goodmundsdottir')
+    text = text.replace('Guðmundsdóttir', 'Goodmundsdottir')
+
+    # Remove em-dashes that might cause pauses
+    text = text.replace('—', ', ')
+
+    return text
+
+
+def contains_strong_word(text: str) -> bool:
+    """Check if text contains any strong words."""
+    text_lower = text.lower()
+    for word in STRONG_WORDS:
+        if re.search(r'\b' + word + r'\b', text_lower):
+            return True
+    return False
+
+
+def get_intensity_for_sentence(text: str, tension_level: int = 2) -> int:
+    """
+    Calculate intensity boost percentage for a sentence.
+
+    Returns:
+        Intensity boost percentage (0, 70, or 100)
+    """
+    has_strong = contains_strong_word(text)
+
+    # High tension chunks get boost
+    if tension_level >= 4:
+        return 100 if has_strong else 70
+    elif tension_level == 3:
+        return 70 if has_strong else 30
+    else:
+        return 70 if has_strong else 0
+
+
+def split_into_sentences(text: str) -> list:
+    """
+    Split text into sentences using regex.
+    Handles common sentence endings: . ! ?
+    Preserves abbreviations like "Dr." "Mr." "etc."
+    """
+    if not text or not text.strip():
+        return []
+
+    # Handle common abbreviations to avoid false splits
+    text = text.replace("Dr.", "Dr<DOT>")
+    text = text.replace("Mr.", "Mr<DOT>")
+    text = text.replace("Mrs.", "Mrs<DOT>")
+    text = text.replace("Ms.", "Ms<DOT>")
+    text = text.replace("etc.", "etc<DOT>")
+    text = text.replace("vs.", "vs<DOT>")
+    text = text.replace("i.e.", "i<DOT>e<DOT>")
+    text = text.replace("e.g.", "e<DOT>g<DOT>")
+
+    # Split on sentence-ending punctuation followed by space
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+
+    # Restore abbreviations and clean up
+    result = []
+    for s in sentences:
+        s = s.replace("<DOT>", ".")
+        s = s.strip()
+        if s:
+            result.append(s)
+
+    return result
+
+class TTSNarrator:
+    def __init__(self, ref_audio_path: str = None, use_female_voice: bool = True):
+        """
+        Initialize TTS Narrator using MiniMax Speech-01-HD.
+
+        Args:
+            ref_audio_path: Not used (kept for backwards compatibility)
+            use_female_voice: Not used (MiniMax uses voice_id)
+        """
+        self.output_dir = Path(__file__).parent.parent / "Output" / "audio" / "tts"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.voice_id = MINIMAX_VOICE_ID
+        print(f"Using MiniMax Speech-01-HD with voice: {self.voice_id}")
+
+    def generate_speech(self, text: str, output_filename: str, is_emphasis: bool = False) -> str:
+        """
+        Generate speech from text using MiniMax Speech-01-HD.
+
+        Args:
+            text: Text to convert to speech
+            output_filename: Name for the output file (without extension)
+            is_emphasis: If True, use slightly faster speed for emphasis
+
+        Returns:
+            Path to the generated audio file
+        """
+        output_path = self.output_dir / f"{output_filename}.wav"
+
+        # Preprocess text for better TTS output
+        processed_text = preprocess_text_for_tts(text)
+
+        print(f"  Generating TTS for: {output_filename}")
+
+        # MiniMax Speech-01 parameters
+        speed = 1.0 if not is_emphasis else 1.05
+
+        result = fal_client.subscribe(
+            'fal-ai/minimax/speech-01-hd',
+            arguments={
+                'text': processed_text,
+                'voice_id': self.voice_id,
+                'speed': speed,
+            },
+            with_logs=False
+        )
+
+        # Get audio URL from response (handle different formats)
+        audio_url = None
+
+        if isinstance(result, dict):
+            audio_url = result.get('audio_url')
+            if not audio_url:
+                audio = result.get('audio')
+                if isinstance(audio, dict):
+                    audio_url = audio.get('url')
+                elif isinstance(audio, str):
+                    audio_url = audio
+            if not audio_url:
+                audio_file = result.get('audio_file')
+                if isinstance(audio_file, dict):
+                    audio_url = audio_file.get('url')
+
+        if audio_url:
+            response = requests.get(audio_url)
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            print(f"    Saved: {output_path}")
+            return str(output_path)
+        else:
+            print(f"    Error: No audio generated. Response: {result}")
+            return None
+
+    def generate_all_chunks(self, enhanced_script: dict) -> list:
+        """
+        Generate TTS for all chunks in the enhanced script.
+
+        Args:
+            enhanced_script: The enhanced script dictionary
+
+        Returns:
+            List of generated audio file paths with metadata
+        """
+        audio_files = []
+
+        # Generate hook
+        hook = enhanced_script.get("hook", {})
+        if hook.get("text"):
+            path = self.generate_speech(
+                hook["text"],
+                "hook"
+            )
+            if path:
+                audio_files.append({
+                    "type": "hook",
+                    "path": path,
+                    "text": hook["text"],
+                    "emotion": hook.get("emotion", "intrigue")
+                })
+
+        # Generate module chunks
+        modules = enhanced_script.get("modules", [])
+        for module in modules:
+            module_id = module.get("id", 0)
+            chunks = module.get("chunks", [])
+
+            for chunk_idx, chunk in enumerate(chunks):
+                text = chunk.get("text", "")
+                if text:
+                    filename = f"module_{module_id}_chunk_{chunk_idx + 1}"
+                    path = self.generate_speech(text, filename)
+                    if path:
+                        audio_files.append({
+                            "type": "chunk",
+                            "module_id": module_id,
+                            "chunk_idx": chunk_idx,
+                            "path": path,
+                            "text": text,
+                            "emotion": chunk.get("emotion", "neutral"),
+                            "module_title": module.get("title", "")
+                        })
+
+        return audio_files
+
+    def generate_all_chunks_sentence_level(self, enhanced_script: dict) -> list:
+        """
+        Generate TTS for all chunks at SENTENCE level.
+
+        Each sentence gets its own audio file for precise control over:
+        - Intensity boosting per sentence (based on strong words + tension)
+        - Pauses only at sentence boundaries (not within)
+
+        Args:
+            enhanced_script: The enhanced script dictionary
+
+        Returns:
+            List of generated audio file metadata with sentence info and intensity
+        """
+        audio_files = []
+
+        # Generate hook sentences
+        hook = enhanced_script.get("hook", {})
+        if hook.get("text"):
+            hook_sentences = split_into_sentences(hook["text"])
+            print(f"\nGenerating hook ({len(hook_sentences)} sentences)...")
+
+            for sent_idx, sentence in enumerate(hook_sentences):
+                filename = f"hook_sent_{sent_idx + 1}"
+                # Calculate intensity for this sentence
+                intensity = get_intensity_for_sentence(sentence, tension_level=3)
+                is_emphasis = intensity > 0
+
+                path = self.generate_speech(sentence, filename, is_emphasis=is_emphasis)
+                if path:
+                    audio_files.append({
+                        "type": "hook_sentence",
+                        "sentence_idx": sent_idx,
+                        "total_sentences": len(hook_sentences),
+                        "path": path,
+                        "text": sentence,
+                        "emotion": hook.get("emotion", "intrigue"),
+                        "intensity_boost_percent": intensity
+                    })
+                    if intensity > 0:
+                        print(f"    Sentence {sent_idx + 1}: +{intensity}% intensity")
+
+        # Generate module chunk sentences
+        modules = enhanced_script.get("modules", [])
+        for module in modules:
+            module_id = module.get("id", 0)
+            chunks = module.get("chunks", [])
+            print(f"\nGenerating Module {module_id}: {module.get('title', '')}")
+
+            for chunk_idx, chunk in enumerate(chunks):
+                text = chunk.get("text", "")
+                if not text:
+                    continue
+
+                tension_level = chunk.get("tension_level", 2)
+                sentences = split_into_sentences(text)
+                print(f"  Chunk {chunk_idx + 1}: {len(sentences)} sentences (tension={tension_level})")
+
+                for sent_idx, sentence in enumerate(sentences):
+                    filename = f"module_{module_id}_chunk_{chunk_idx + 1}_sent_{sent_idx + 1}"
+
+                    # Calculate intensity based on tension level and strong words
+                    intensity = get_intensity_for_sentence(sentence, tension_level)
+                    is_emphasis = intensity > 0
+
+                    path = self.generate_speech(sentence, filename, is_emphasis=is_emphasis)
+                    if path:
+                        audio_files.append({
+                            "type": "chunk_sentence",
+                            "module_id": module_id,
+                            "chunk_idx": chunk_idx,
+                            "sentence_idx": sent_idx,
+                            "total_sentences": len(sentences),
+                            "path": path,
+                            "text": sentence,
+                            "emotion": chunk.get("emotion", "neutral"),
+                            "tension_level": tension_level,
+                            "intensity_boost_percent": intensity,
+                            "module_title": module.get("title", "")
+                        })
+                        if intensity > 0:
+                            print(f"      Sent {sent_idx + 1}: +{intensity}% intensity")
+
+        return audio_files
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    # Initialize narrator (uses MiniMax Speech-01-HD)
+    narrator = TTSNarrator()
+
+    # Test with sample text
+    test_text = "Welcome to the podcast. Today we explore a remarkable story of courage and determination."
+    path = narrator.generate_speech(test_text, "test_minimax_voice")
+    print(f"Generated: {path}")
+    print("\nMiniMax TTS test complete. Listen to the output to verify.")
