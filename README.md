@@ -55,7 +55,7 @@ python run_pipeline.py full --input Input/transcript.txt
 
 ## Tech Stack
 
-- **LLM:** Claude Opus 4.5 (Anthropic)
+- **LLM:** Gemini 3 Pro (Google)
 - **TTS:** MiniMax Speech-01-HD (Fal AI)
 - **BGM:** Stable Audio (Fal AI)
 - **Images:** Flux (Fal AI)
