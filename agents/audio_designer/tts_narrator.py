@@ -1,144 +1,73 @@
 """
-TTS Narrator Agent
+TTS Narrator
+Author: Sarath
 
 Generates speech audio from text using Fal AI MiniMax Speech-01-HD.
 
-Updated for sentence-level processing:
-- Generates TTS for each sentence separately
-- Allows precise control over intensity and pauses at sentence boundaries
-- Uses MiniMax Speech-01-HD for natural documentary narrator voice
+Features:
+- Sentence-level TTS generation for precise control
+- Intensity boosting based on tension and strong words
+- Variable pauses at sentence boundaries
+
+Text processing functions are imported from utils.text_processing.
 """
 
-import os
-import re
 import fal_client
 import requests
 from pathlib import Path
+from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+
+from utils.text_processing import (
+    preprocess_text_for_tts,
+    get_intensity_for_sentence,
+    split_into_sentences
+)
+
+load_dotenv()
 
 # MiniMax Speech-01 configuration
 MINIMAX_VOICE_ID = "Friendly_Female_English"  # Warm, engaging narrator
 
-# Strong words that need intensity emphasis
-STRONG_WORDS = {
-    'wild', 'otherworldly', 'impossible', 'revolutionary', 'radical',
-    'volcanic', 'defy', 'defied', 'extraordinary', 'unprecedented',
-    'explosive', 'stunning', 'remarkable', 'incredible', 'triumph',
-    'breakthrough', 'decisive', 'feral', 'electric', 'volatile',
-    'dissonant', 'lightning', 'quicksilver', 'captivated', 'unheard'
-}
-
-
-def preprocess_text_for_tts(text: str) -> str:
-    """
-    Preprocess text to avoid TTS issues.
-    - Convert numbers to words
-    - Fix pronunciations (Björk -> Byerk)
-    - Handle hyphens that might cause pauses
-    """
-    # Convert number patterns
-    text = re.sub(r'\b10-year-old\b', 'ten year old', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b11\b', 'eleven', text)
-    text = re.sub(r'\b15\b', 'fifteen', text)
-    text = re.sub(r'\b1965\b', 'nineteen sixty-five', text)
-    text = re.sub(r'\b1977\b', 'nineteen seventy-seven', text)
-    text = re.sub(r'\b1980s\b', 'nineteen eighties', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b80s\b', 'eighties', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b1983\b', 'nineteen eighty-three', text)
-    text = re.sub(r'\b1986\b', 'nineteen eighty-six', text)
-    text = re.sub(r'\b1988\b', 'nineteen eighty-eight', text)
-    text = re.sub(r'\b1992\b', 'nineteen ninety-two', text)
-    text = re.sub(r'\b1993\b', 'nineteen ninety-three', text)
-
-    # Fix Björk pronunciation
-    text = text.replace('Björk', 'Byerk')
-    text = text.replace('björk', 'byerk')
-    text = text.replace('Bjork', 'Byerk')
-    text = text.replace('Byork', 'Byerk')
-
-    # Fix other Icelandic names
-    text = text.replace('Gudmundsdottir', 'Goodmundsdottir')
-    text = text.replace('Guðmundsdóttir', 'Goodmundsdottir')
-
-    # Remove em-dashes that might cause pauses
-    text = text.replace('—', ', ')
-
-    return text
-
-
-def contains_strong_word(text: str) -> bool:
-    """Check if text contains any strong words."""
-    text_lower = text.lower()
-    for word in STRONG_WORDS:
-        if re.search(r'\b' + word + r'\b', text_lower):
-            return True
-    return False
-
-
-def get_intensity_for_sentence(text: str, tension_level: int = 2) -> int:
-    """
-    Calculate intensity boost percentage for a sentence.
-
-    Returns:
-        Intensity boost percentage (0, 70, or 100)
-    """
-    has_strong = contains_strong_word(text)
-
-    # High tension chunks get boost
-    if tension_level >= 4:
-        return 100 if has_strong else 70
-    elif tension_level == 3:
-        return 70 if has_strong else 30
-    else:
-        return 70 if has_strong else 0
-
-
-def split_into_sentences(text: str) -> list:
-    """
-    Split text into sentences using regex.
-    Handles common sentence endings: . ! ?
-    Preserves abbreviations like "Dr." "Mr." "etc."
-    """
-    if not text or not text.strip():
-        return []
-
-    # Handle common abbreviations to avoid false splits
-    text = text.replace("Dr.", "Dr<DOT>")
-    text = text.replace("Mr.", "Mr<DOT>")
-    text = text.replace("Mrs.", "Mrs<DOT>")
-    text = text.replace("Ms.", "Ms<DOT>")
-    text = text.replace("etc.", "etc<DOT>")
-    text = text.replace("vs.", "vs<DOT>")
-    text = text.replace("i.e.", "i<DOT>e<DOT>")
-    text = text.replace("e.g.", "e<DOT>g<DOT>")
-
-    # Split on sentence-ending punctuation followed by space
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-
-    # Restore abbreviations and clean up
-    result = []
-    for s in sentences:
-        s = s.replace("<DOT>", ".")
-        s = s.strip()
-        if s:
-            result.append(s)
-
-    return result
 
 class TTSNarrator:
-    def __init__(self, ref_audio_path: str = None, use_female_voice: bool = True):
+    """
+    Text-to-Speech narrator using MiniMax Speech-01-HD.
+
+    Features:
+    - Sentence-level generation for precise intensity control
+    - Automatic text preprocessing for TTS
+    - Intensity calculation based on tension and strong words
+    """
+
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        ref_audio_path: Optional[str] = None,
+        use_female_voice: bool = True
+    ):
         """
         Initialize TTS Narrator using MiniMax Speech-01-HD.
 
         Args:
+            output_dir: Output directory for TTS files
             ref_audio_path: Not used (kept for backwards compatibility)
             use_female_voice: Not used (MiniMax uses voice_id)
         """
-        self.output_dir = Path(__file__).parent.parent / "Output" / "audio" / "tts"
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = Path(__file__).parent.parent.parent / "Output" / "audio" / "tts"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.voice_id = MINIMAX_VOICE_ID
-        print(f"Using MiniMax Speech-01-HD with voice: {self.voice_id}")
+        print(f"[TTSNarrator] Using MiniMax Speech-01-HD with voice: {self.voice_id}")
 
-    def generate_speech(self, text: str, output_filename: str, is_emphasis: bool = False) -> str:
+    def generate_speech(
+        self,
+        text: str,
+        output_filename: str,
+        is_emphasis: bool = False
+    ) -> Optional[str]:
         """
         Generate speech from text using MiniMax Speech-01-HD.
 
@@ -196,7 +125,7 @@ class TTSNarrator:
             print(f"    Error: No audio generated. Response: {result}")
             return None
 
-    def generate_all_chunks(self, enhanced_script: dict) -> list:
+    def generate_all_chunks(self, enhanced_script: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Generate TTS for all chunks in the enhanced script.
 
@@ -247,7 +176,10 @@ class TTSNarrator:
 
         return audio_files
 
-    def generate_all_chunks_sentence_level(self, enhanced_script: dict) -> list:
+    def generate_all_chunks_sentence_level(
+        self,
+        enhanced_script: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """
         Generate TTS for all chunks at SENTENCE level.
 
@@ -334,9 +266,6 @@ class TTSNarrator:
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv()
-
     # Initialize narrator (uses MiniMax Speech-01-HD)
     narrator = TTSNarrator()
 

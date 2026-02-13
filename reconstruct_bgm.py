@@ -227,9 +227,9 @@ def remix_hook_with_new_bgm(voice_only: bool = False):
             bgm = bgm[500:]
             print(f"Trimmed 500ms noise from BGM start")
 
-            # Lower volume (raised ~3dB for more presence while keeping voice primary)
-            bgm = bgm - 17
-            print(f"BGM volume: -17dB")
+            # Lower volume (reduced 30% for voice prominence)
+            bgm = bgm - 21
+            print(f"BGM volume: -21dB")
 
             # Loop if needed
             if len(bgm) < len(hook_styled):
@@ -353,9 +353,9 @@ def remix_module_with_new_bgm(module_id: int, voice_only: bool = False):
             # Trim 500ms from start
             bgm = bgm[500:]
 
-            # Lower volume (raised ~3dB for more presence while keeping voice primary)
-            bgm = bgm - 15
-            print(f"BGM volume: -15dB")
+            # Lower volume (reduced 30% for voice prominence)
+            bgm = bgm - 19
+            print(f"BGM volume: -19dB")
 
             # Loop if needed
             if len(bgm) < len(module_styled):

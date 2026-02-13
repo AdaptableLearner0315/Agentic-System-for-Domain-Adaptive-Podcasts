@@ -1,5 +1,7 @@
 # Podcast Enhancement System - CLAUDE.md
 
+**Author: Sarath**
+
 This document provides context for Claude Code to operate effectively in this repository.
 
 ## Project Overview
@@ -18,30 +20,134 @@ An agentic podcast enhancement system that transforms raw audio into an engaging
 ## Architecture
 
 ```
-Input Audio → Transcribe → Script Enhancer → Director Review Loop
-                                    ↓
-                           Enhanced Script JSON
-                                    ↓
-          ┌─────────────────────────┼─────────────────────────┐
-          ↓                         ↓                         ↓
-   TTS Narrator              Music Generator           Image Generator
-(MiniMax Speech-01-HD)     (Fal AI stable-audio)      (Fal AI Flux)
-Sentence-level generation   9-Segment Daisy-Chain    Narrative-driven images
-          ↓                         ↓                         ↓
-          └────────────┬────────────┘                         │
-                       ↓                                      │
-        advanced_bgm_pipeline_v2.py                           │
-     (VAD Ducking + 5s Crossfades + Conditioning)             │
-                       ↓                                      │
-              Final Mixed Audio                               │
-                       ↓                                      │
-                       └──────────────┬───────────────────────┘
-                                      ↓
-                            Video Assembler (FFmpeg)
-                        (Static images + crossfade + audio)
-                                      ↓
-                            Final Podcast Video (MP4)
+                              run_pipeline.py
+                           (Unified Entry Point)
+                                    |
+         ┌──────────┬──────────┬────┴────┬──────────┬──────────┐
+         |          |          |         |          |          |
+      enhance    audio      visual     full      preview     bgm
+         |          |          |         |          |          |
+         v          v          v         v          v          v
+┌─────────────────────────────────────────────────────────────────────┐
+|                         AGENT LAYER                                  |
+├─────────────────────────────────────────────────────────────────────┤
+|                                                                      |
+|  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐ |
+|  | ScriptEnhancer  |    |    Director     |    |  TTSNarrator    | |
+|  | (script_enhancer|    |   (director.py) |    | (tts_narrator   | |
+|  |  .py)           |    |                 |    |  .py)           | |
+|  | Transforms raw  |    | Reviews scripts |    | MiniMax Speech  | |
+|  | transcript into |<-->| provides score  |    | Sentence-level  | |
+|  | emotional arc   |    | & feedback      |    | generation      | |
+|  └─────────────────┘    └─────────────────┘    └─────────────────┘ |
+|                                                                      |
+|  ┌─────────────────┐    ┌─────────────────┐                        |
+|  | MusicGenerator  |    | ImageGenerator  |                        |
+|  | (music_generator|    | (image_generator|                        |
+|  |  .py)           |    |  .py)           |                        |
+|  | Fal AI stable-  |    | Fal AI Flux     |                        |
+|  | audio BGM       |    | Narrative-driven|                        |
+|  | generation      |    | images          |                        |
+|  └─────────────────┘    └─────────────────┘                        |
+|                                                                      |
+└─────────────────────────────────────────────────────────────────────┘
+                                    |
+                                    v
+┌─────────────────────────────────────────────────────────────────────┐
+|                        UTILITIES LAYER                               |
+├─────────────────────────────────────────────────────────────────────┤
+|  audio_mixer.py     | voice_styles.py    | video_assembler.py      |
+|  VAD ducking        | Module-specific    | FFmpeg video            |
+|  Crossfades         | voice processing   | assembly with           |
+|  Normalization      | Speed/EQ/Reverb    | crossfade transitions   |
+└─────────────────────────────────────────────────────────────────────┘
+                                    |
+                                    v
+┌─────────────────────────────────────────────────────────────────────┐
+|                       PIPELINE SCRIPTS                               |
+├─────────────────────────────────────────────────────────────────────┤
+|  advanced_bgm_pipeline_v2.py  | generate_clean_preview.py           |
+|  9-segment daisy-chain        | Emotionally connective pacing       |
+|  BGM generation               | Module preview generation           |
+└─────────────────────────────────────────────────────────────────────┘
+                                    |
+                                    v
+                        Final Podcast Video (MP4)
 ```
+
+## Unified Entry Point: run_pipeline.py
+
+The main entry point provides subcommands for each pipeline stage:
+
+```bash
+# Run the full pipeline
+python run_pipeline.py full --input transcript.txt
+
+# Individual stages
+python run_pipeline.py enhance --input transcript.txt
+python run_pipeline.py audio --script Output/enhanced_script.json
+python run_pipeline.py visual --script Output/enhanced_script.json
+python run_pipeline.py preview --module 1
+python run_pipeline.py bgm --all
+
+# Get help
+python run_pipeline.py --help
+python run_pipeline.py <command> --help
+```
+
+### Available Commands
+
+| Command | Description | Key Arguments |
+|---------|-------------|---------------|
+| `enhance` | Enhance transcript with emotional arc | `--input`, `--output`, `--model` |
+| `audio` | Generate TTS + BGM | `--script`, `--skip-tts`, `--skip-bgm` |
+| `visual` | Generate narrative images | `--script` |
+| `full` | Run complete pipeline | `--input`, `--model` |
+| `preview` | Generate module preview | `--module`, `--hook`, `--all` |
+| `bgm` | 9-segment BGM pipeline | `--generate`, `--stitch`, `--mix`, `--all` |
+
+## Agent System
+
+The system uses 5 specialized agents that work together:
+
+### 1. ScriptEnhancer (`agents/script_enhancer.py`)
+**Purpose:** Transforms raw transcripts into engaging, structured scripts
+
+- Creates compelling 30-45 second hooks
+- Structures content into 4 modules with emotional arcs
+- Maps emotions (wonder, tension, triumph, etc.) to each chunk
+- Extracts keywords, visual cues, and audio cues
+- Target: 8-9 minutes total (1400-1600 words)
+
+### 2. Director (`agents/director.py`)
+**Purpose:** Reviews and scores enhanced scripts
+
+- Evaluates hook quality, emotional arc, story flow
+- Provides feedback for script revision
+- Approval threshold: score >= 7
+- Runs in loop with ScriptEnhancer until approved
+
+### 3. TTSNarrator (`agents/tts_narrator.py`)
+**Purpose:** Generates voice narration
+
+- Uses MiniMax Speech-01-HD via Fal AI
+- Sentence-level generation for precise control
+- Handles pronunciation (e.g., "Bjork" -> "Byerk")
+
+### 4. MusicGenerator (`agents/music_generator.py`)
+**Purpose:** Generates background music
+
+- Creates emotion-matched BGM using Fal AI stable-audio
+- Supports daisy-chain conditioning for seamless transitions
+- 9-segment architecture for full podcast
+
+### 5. ImageGenerator (`agents/image_generator.py`)
+**Purpose:** Generates narrative-driven images
+
+- Uses Fal AI Flux model
+- Cinematic photography style
+- 16:9 landscape format
+- 16 images total (2 hook + 14 modules)
 
 ## Voice Styles (Module-Specific)
 
@@ -88,7 +194,12 @@ The BGM system uses audio-to-audio conditioning where each segment feeds into th
 
 ## Key Files
 
-### Entry Points
+### Entry Point
+| File | Purpose | Usage |
+|------|---------|-------|
+| `run_pipeline.py` | **Unified entry point** | `python run_pipeline.py <command>` |
+
+### Legacy Entry Points (still functional)
 | File | Purpose | Usage |
 |------|---------|-------|
 | `transcribe.py` | Convert audio to text | `python transcribe.py` |
@@ -102,27 +213,11 @@ The BGM system uses audio-to-audio conditioning where each segment feeds into th
 | `reconstruct_bgm.py` | Simple BGM remix + voice-only mode | `python reconstruct_bgm.py --all --voice-only` |
 | `advanced_bgm_pipeline_v2.py` | **9-segment daisy-chain (recommended)** | `python advanced_bgm_pipeline_v2.py --all` |
 
-### BGM Pipeline Commands
-```bash
-# Generate voice-only version (no BGM)
-python reconstruct_bgm.py --remix --voice-only
-python reconstruct_bgm.py --update-video --voice-only
-
-# Full 9-segment daisy-chain pipeline (recommended)
-python advanced_bgm_pipeline_v2.py --all
-
-# Or step-by-step:
-python advanced_bgm_pipeline_v2.py --generate  # Generate 9 segments
-python advanced_bgm_pipeline_v2.py --stitch    # Stitch with crossfades
-python advanced_bgm_pipeline_v2.py --mix       # Mix with voice + ducking
-python advanced_bgm_pipeline_v2.py --video     # Update final video
-```
-
 ### Agent Modules (`agents/`)
 | File | Class | Purpose |
 |------|-------|---------|
 | `script_enhancer.py` | `ScriptEnhancer` | Transforms transcript into engaging script with emotions, modules, hooks |
-| `director.py` | `Director` | Reviews scripts and provides feedback (approval threshold: score ≥7) |
+| `director.py` | `Director` | Reviews scripts and provides feedback (approval threshold: score >= 7) |
 | `tts_narrator.py` | `TTSNarrator` | Generates speech using MiniMax Speech-01-HD (sentence-level) |
 | `music_generator.py` | `MusicGenerator` | Generates emotion-matched BGM using Fal AI stable-audio |
 | `image_generator.py` | `ImageGenerator` | Generates narrative-driven images using Fal AI Flux |
@@ -271,36 +366,48 @@ MINIMAX_API_KEY=your-minimax-key  # For Speech-01-HD TTS
 
 ## Common Workflows
 
-### Full Pipeline (New Project)
+### Full Pipeline (Recommended)
 ```bash
-# 1. Transcribe audio (if needed)
+# Single command to run everything
+python run_pipeline.py full --input transcript.txt
+```
+
+### Step-by-Step Pipeline
+```bash
+# 1. Enhance script (with Director review loop)
+python run_pipeline.py enhance --input transcript.txt
+
+# 2. Generate audio (TTS + BGM)
+python run_pipeline.py audio --script Output/enhanced_script.json
+
+# 3. Generate visuals
+python run_pipeline.py visual --script Output/enhanced_script.json
+
+# 4. Generate 9-segment daisy-chain BGM
+python run_pipeline.py bgm --all
+```
+
+### Preview Workflow
+```bash
+# Generate previews for quality review
+python run_pipeline.py preview --hook
+python run_pipeline.py preview --module 1
+python run_pipeline.py preview --all
+```
+
+### Legacy Commands (Still Supported)
+```bash
+# Transcribe audio (if needed)
 python transcribe.py
 
-# 2. Enhance script (with Director review loop)
+# Script enhancement
 python run_enhancement.py --model sonnet
 
-# 3. Generate TTS (sentence-level)
-python run_audio_enhancement.py
+# Audio generation
+python run_audio_enhancement.py --sentence-level
 
-# 4. Generate voice-only previews
-python reconstruct_bgm.py --remix --voice-only
-python reconstruct_bgm.py --update-video --voice-only
-
-# 5. Generate 9-segment daisy-chain BGM and final video
+# BGM pipeline
 python advanced_bgm_pipeline_v2.py --all
-```
-
-### Regenerate BGM Only
-```bash
-python advanced_bgm_pipeline_v2.py --generate  # Regenerate segments
-python advanced_bgm_pipeline_v2.py --stitch    # Re-stitch
-python advanced_bgm_pipeline_v2.py --mix       # Re-mix with voice
-python advanced_bgm_pipeline_v2.py --video     # Update video
-```
-
-### Generate Voice-Only Version
-```bash
-python reconstruct_bgm.py --all --voice-only
 ```
 
 ## Script Duration Guidelines
@@ -320,9 +427,9 @@ The Director agent scores scripts on:
 4. **Metadata Quality**: Specific keywords, cinematic cues
 5. **Module Structure**: Clear titles, appropriate distribution
 
-**Approval**: Score ≥7 AND no critical criteria below 6
+**Approval**: Score >= 7 AND no critical criteria below 6
 
-## Current Output (Björk Podcast)
+## Current Output (Bjork Podcast)
 
 ### Audio
 **Final Audio:** `Output/audio/final_v2/final_podcast_v2.mp3`
@@ -342,11 +449,11 @@ The Director agent scores scripts on:
 
 | Section | Duration | Images | Visual Theme |
 |---------|----------|--------|--------------|
-| Hook | 45s | 2 | Stage spotlight → Iceland landscape |
-| Module 1 | 128s | 4 | Volcanic origin → Commune → Musical duality → Aurora |
-| Module 2 | 81s | 3 | Recording studio → Album celebration → Street scene |
-| Module 3 | 106s | 3 | Punk club → Experimental performance → New beginning |
-| Module 4 | 148s | 4 | TV spotlight → Studio tension → Solo liberation → Full circle |
+| Hook | 45s | 2 | Stage spotlight -> Iceland landscape |
+| Module 1 | 128s | 4 | Volcanic origin -> Commune -> Musical duality -> Aurora |
+| Module 2 | 81s | 3 | Recording studio -> Album celebration -> Street scene |
+| Module 3 | 106s | 3 | Punk club -> Experimental performance -> New beginning |
+| Module 4 | 148s | 4 | TV spotlight -> Studio tension -> Solo liberation -> Full circle |
 
 **Total:** 16 narrative-driven images
 
@@ -366,7 +473,7 @@ The Director agent scores scripts on:
 ## Known Issues and Fixes
 
 1. **BGM noise at start**: Trim 500ms from BGM start, add 2s fade-in
-2. **Pronunciation "Björk"**: Preprocessed to "Byerk" in TTS
+2. **Pronunciation "Bjork"**: Preprocessed to "Byerk" in TTS
 3. **Fixed pauses feel robotic**: Use variable pauses based on emotional role
 4. **JSON parsing in prompts**: Use double curly braces `{{` `}}` in f-strings
 5. **Audio cutoff at module transitions**: Removed `-shortest` FFmpeg flag in `video_assembler.py` and `reconstruct_bgm.py`
@@ -383,14 +490,26 @@ The Director agent scores scripts on:
 
 ### Recurring Visual Motifs
 - **Iceland Landscape**: Appears in Hook (end), Module 1 (open/close), Module 4 (finale)
-- **Performance Spaces**: School stage → Punk club → TV studio → Solo studio
-- **Color Progression**: Warm amber → Cool blue → Dark/gritty → Bright → Transcendent
+- **Performance Spaces**: School stage -> Punk club -> TV studio -> Solo studio
+- **Color Progression**: Warm amber -> Cool blue -> Dark/gritty -> Bright -> Transcendent
 
 ### Image Generation
 Images are generated using Fal AI Flux model with cinematic style suffix:
 ```python
 CINEMATIC_STYLE = ', cinematic photography, documentary style, photorealistic, film grain, 35mm film aesthetic, professional lighting, high quality'
 ```
+
+## Archive (Legacy Files)
+
+The following files have been archived to `archive/` as they are superseded by newer implementations:
+
+| File | Replacement |
+|------|-------------|
+| `advanced_bgm_pipeline.py` | `advanced_bgm_pipeline_v2.py` |
+| `generate_final_v4.py` | `run_pipeline.py` |
+| `apply_audio_effects_v3.py` | `utils/audio_mixer.py` |
+| `regenerate_bgm.py` | `advanced_bgm_pipeline_v2.py` |
+| `preview_module.py` | `generate_clean_preview.py` |
 
 ## Future Enhancements (Planned)
 

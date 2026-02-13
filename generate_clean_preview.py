@@ -270,9 +270,9 @@ def generate_hook_preview():
         bgm = bgm[500:]
         print(f"  Trimmed 500ms noise from BGM start")
 
-        # Lower volume
-        bgm = bgm - 20
-        print(f"  BGM volume: -20dB")
+        # Lower volume (reduced 30% for voice prominence)
+        bgm = bgm - 24
+        print(f"  BGM volume: -24dB")
 
         # Loop BGM if needed
         if len(bgm) < len(hook_styled):
@@ -449,9 +449,9 @@ def generate_module_preview(module_id: int):
         bgm = bgm[500:]
         print(f"  Trimmed 500ms noise from BGM start")
 
-        # Lower volume
-        bgm = bgm - 18
-        print(f"  BGM volume: -18dB")
+        # Lower volume (reduced 30% for voice prominence)
+        bgm = bgm - 22
+        print(f"  BGM volume: -22dB")
 
         # Loop BGM if needed
         if len(bgm) < len(module_styled):
