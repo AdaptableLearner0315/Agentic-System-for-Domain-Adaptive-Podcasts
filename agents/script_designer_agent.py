@@ -51,7 +51,9 @@ ENHANCEMENT_PROMPT = """You are an expert podcast script enhancer. Your job is t
   "hook": {{
     "text": "The compelling opening text...",
     "emotion": "intrigue",
-    "duration_estimate_seconds": 30
+    "duration_estimate_seconds": 30,
+    "speaker": "narrator",
+    "visual_cues": ["visual description for hook"]
   }},
   "modules": [
     {{
@@ -65,13 +67,20 @@ ENHANCEMENT_PROMPT = """You are an expert podcast script enhancer. Your job is t
           "tension_level": 3,
           "keywords": ["keyword1", "keyword2"],
           "visual_cues": ["visual description 1"],
-          "audio_cues": ["audio description 1"]
+          "audio_cues": ["audio description 1"],
+          "speaker": "narrator"
         }}
       ]
     }}
   ]
 }}
 ```
+
+## Speaker Assignment:
+- For single-narrator podcasts, use "narrator" as the speaker
+- For interview format, use "host" and "guest"
+- For co-host format, use "host_1" and "host_2"
+- For narrative with characters, use "narrator" and "character"
 
 ## Guidelines:
 - **PRESERVE CONTENT**: Use ALL the information from the transcript, don't over-summarize
@@ -99,20 +108,27 @@ class ScriptDesignerAgent(BaseAgent):
     - Module structure with roller-coaster pacing
     - Hook generation for immediate engagement
     - Metadata extraction for audio/visual design
+    - Speaker assignment for multi-speaker formats
     """
 
-    def __init__(self, model: str = "claude-opus-4-5-20250514"):
+    def __init__(
+        self,
+        model: str = "claude-opus-4-5-20250514",
+        speaker_format: Optional[str] = None
+    ):
         """
         Initialize the Script Designer Agent.
 
         Args:
             model: LLM model to use (default: claude-opus-4-5-20250514)
+            speaker_format: Speaker format hint (single, interview, co_hosts, narrator_characters)
         """
         super().__init__(
             name="ScriptDesigner",
             output_category="",  # Root Output directory
             model=model
         )
+        self.speaker_format = speaker_format or "single"
 
     def enhance(self, transcript: str, feedback: Optional[str] = None) -> Dict[str, Any]:
         """

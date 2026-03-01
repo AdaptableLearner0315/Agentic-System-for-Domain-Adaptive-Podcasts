@@ -1,0 +1,485 @@
+"""
+Job state management service.
+
+Tracks all generation jobs in memory, providing state management,
+job lifecycle handling, and progress tracking.
+"""
+
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+import threading
+
+from ..models.enums import JobStatus, PipelineMode, GenerationPhase
+from ..models.responses import (
+    JobResponse,
+    ProgressResponse,
+    ResultResponse,
+    AssetInfo,
+)
+
+
+@dataclass
+class JobState:
+    """
+    Internal job state representation.
+
+    Attributes:
+        id: Unique job identifier
+        status: Current job status
+        mode: Pipeline mode
+        created_at: Creation timestamp
+        started_at: When job started running
+        completed_at: When job finished
+        prompt: Original prompt
+        file_ids: Input file IDs
+        guidance: User guidance
+        config: Pro mode configuration
+        progress: Current progress state
+        result: Final result (when completed)
+        error: Error message (when failed)
+        cancel_requested: Whether cancellation was requested
+    """
+    id: str
+    status: JobStatus
+    mode: PipelineMode
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    prompt: Optional[str] = None
+    file_ids: Optional[List[str]] = None
+    guidance: Optional[str] = None
+    config: Optional[Dict] = None
+    progress: Optional[Dict] = None
+    result: Optional[Dict] = None
+    error: Optional[str] = None
+    cancel_requested: bool = False
+
+
+class JobManager:
+    """
+    Manages job state and lifecycle.
+
+    Provides thread-safe access to job state, with methods for
+    creating, updating, and querying jobs.
+
+    This implementation stores jobs in memory. For production,
+    consider persisting to a database.
+
+    Attributes:
+        _jobs: Dictionary mapping job IDs to job state
+        _lock: Thread lock for safe concurrent access
+    """
+
+    def __init__(self):
+        """Initialize the job manager."""
+        self._jobs: Dict[str, JobState] = {}
+        self._lock = threading.RLock()
+
+    def create_job(
+        self,
+        mode: PipelineMode,
+        prompt: Optional[str] = None,
+        file_ids: Optional[List[str]] = None,
+        guidance: Optional[str] = None,
+        config: Optional[Dict] = None,
+    ) -> JobResponse:
+        """
+        Create a new generation job.
+
+        Args:
+            mode: Pipeline mode (normal or pro).
+            prompt: Generation prompt.
+            file_ids: Input file IDs.
+            guidance: User guidance.
+            config: Pro mode configuration.
+
+        Returns:
+            JobResponse with the new job details.
+        """
+        job_id = str(uuid.uuid4())[:8]  # Short ID for convenience
+
+        job_state = JobState(
+            id=job_id,
+            status=JobStatus.PENDING,
+            mode=mode,
+            created_at=datetime.utcnow(),
+            prompt=prompt,
+            file_ids=file_ids,
+            guidance=guidance,
+            config=config,
+        )
+
+        with self._lock:
+            self._jobs[job_id] = job_state
+
+        return self._to_response(job_state)
+
+    def get_job(self, job_id: str) -> Optional[JobResponse]:
+        """
+        Get job details by ID.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            JobResponse if found, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                return self._to_response(job_state)
+        return None
+
+    def start_job(self, job_id: str) -> Optional[JobResponse]:
+        """
+        Mark a job as running.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            Updated JobResponse if found, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                job_state.status = JobStatus.RUNNING
+                job_state.started_at = datetime.utcnow()
+                return self._to_response(job_state)
+        return None
+
+    def complete_job(
+        self,
+        job_id: str,
+        result: Dict,
+    ) -> Optional[JobResponse]:
+        """
+        Mark a job as completed with result.
+
+        Args:
+            job_id: Unique job identifier.
+            result: Pipeline result dictionary.
+
+        Returns:
+            Updated JobResponse if found, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                job_state.status = JobStatus.COMPLETED
+                job_state.completed_at = datetime.utcnow()
+                job_state.result = result
+                return self._to_response(job_state)
+        return None
+
+    def fail_job(
+        self,
+        job_id: str,
+        error: str,
+    ) -> Optional[JobResponse]:
+        """
+        Mark a job as failed with error.
+
+        Args:
+            job_id: Unique job identifier.
+            error: Error message.
+
+        Returns:
+            Updated JobResponse if found, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                job_state.status = JobStatus.FAILED
+                job_state.completed_at = datetime.utcnow()
+                job_state.error = error
+                return self._to_response(job_state)
+        return None
+
+    def cancel_job(self, job_id: str) -> Optional[JobResponse]:
+        """
+        Mark a job as cancelled.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            Updated JobResponse if found, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                job_state.status = JobStatus.CANCELLED
+                job_state.completed_at = datetime.utcnow()
+                job_state.cancel_requested = True
+                return self._to_response(job_state)
+        return None
+
+    def request_cancellation(self, job_id: str) -> bool:
+        """
+        Request cancellation of a job.
+
+        The pipeline should check this flag and stop gracefully.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            True if job exists and cancellation was requested.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                job_state.cancel_requested = True
+                return True
+        return False
+
+    def is_cancellation_requested(self, job_id: str) -> bool:
+        """
+        Check if cancellation was requested for a job.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            True if cancellation was requested.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            return job_state.cancel_requested if job_state else False
+
+    def update_progress(
+        self,
+        job_id: str,
+        phase: GenerationPhase,
+        message: str,
+        progress_percent: float = 0.0,
+        current_step: int = 0,
+        total_steps: int = 0,
+        eta_seconds: Optional[float] = None,
+        preview: Optional[str] = None,
+        details: Optional[Dict] = None,
+    ) -> Optional[ProgressResponse]:
+        """
+        Update job progress.
+
+        Args:
+            job_id: Unique job identifier.
+            phase: Current generation phase.
+            message: Status message.
+            progress_percent: Overall progress (0-100).
+            current_step: Current step number.
+            total_steps: Total steps.
+            eta_seconds: Estimated time remaining.
+            preview: Preview content.
+            details: Additional details.
+
+        Returns:
+            Updated ProgressResponse if job exists.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                elapsed = 0.0
+                if job_state.started_at:
+                    elapsed = (datetime.utcnow() - job_state.started_at).total_seconds()
+
+                job_state.progress = {
+                    "phase": phase,
+                    "message": message,
+                    "progress_percent": progress_percent,
+                    "current_step": current_step,
+                    "total_steps": total_steps,
+                    "eta_seconds": eta_seconds,
+                    "preview": preview,
+                    "details": details or {},
+                    "elapsed_seconds": elapsed,
+                }
+
+                return ProgressResponse(
+                    job_id=job_id,
+                    phase=phase,
+                    message=message,
+                    progress_percent=progress_percent,
+                    current_step=current_step,
+                    total_steps=total_steps,
+                    eta_seconds=eta_seconds,
+                    preview=preview,
+                    elapsed_seconds=elapsed,
+                    details=details,
+                )
+        return None
+
+    def get_progress(self, job_id: str) -> Optional[ProgressResponse]:
+        """
+        Get current progress for a job.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            ProgressResponse if job exists and has progress.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state:
+                if job_state.progress:
+                    return ProgressResponse(
+                        job_id=job_id,
+                        phase=job_state.progress["phase"],
+                        message=job_state.progress["message"],
+                        progress_percent=job_state.progress["progress_percent"],
+                        current_step=job_state.progress["current_step"],
+                        total_steps=job_state.progress["total_steps"],
+                        eta_seconds=job_state.progress.get("eta_seconds"),
+                        preview=job_state.progress.get("preview"),
+                        elapsed_seconds=job_state.progress.get("elapsed_seconds", 0),
+                        details=job_state.progress.get("details"),
+                    )
+                else:
+                    # Return initial progress
+                    return ProgressResponse(
+                        job_id=job_id,
+                        phase=GenerationPhase.INITIALIZING,
+                        message="Job queued",
+                        progress_percent=0,
+                        current_step=0,
+                        total_steps=0,
+                        elapsed_seconds=0,
+                    )
+        return None
+
+    def get_result(self, job_id: str) -> Optional[ResultResponse]:
+        """
+        Get result for a completed job.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            ResultResponse if job is completed with result.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if job_state and job_state.result:
+                result = job_state.result
+                return ResultResponse(
+                    job_id=job_id,
+                    success=result.get("success", False),
+                    output_path=result.get("output_path"),
+                    video_url=f"/api/outputs/stream/{job_id}" if result.get("output_path") else None,
+                    audio_url=f"/api/outputs/download/{job_id}?file_type=audio" if result.get("output_path") else None,
+                    duration_seconds=result.get("duration_seconds"),
+                    script=result.get("script"),
+                    tts_assets=[
+                        AssetInfo(**a) for a in result.get("tts_files", [])
+                    ],
+                    bgm_assets=[
+                        AssetInfo(**a) for a in result.get("bgm_files", [])
+                    ],
+                    image_assets=[
+                        AssetInfo(**a) for a in result.get("image_files", [])
+                    ],
+                    review_history=result.get("review_history"),
+                    config_used=result.get("config_used"),
+                    error=result.get("error"),
+                )
+            elif job_state and job_state.status == JobStatus.FAILED:
+                return ResultResponse(
+                    job_id=job_id,
+                    success=False,
+                    error=job_state.error,
+                )
+        return None
+
+    def get_running_jobs(self) -> List[str]:
+        """
+        Get IDs of all currently running jobs.
+
+        Returns:
+            List of job IDs with RUNNING status.
+        """
+        with self._lock:
+            return [
+                job_id for job_id, job in self._jobs.items()
+                if job.status == JobStatus.RUNNING
+            ]
+
+    def list_jobs(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status_filter: Optional[JobStatus] = None,
+    ) -> Tuple[List[JobResponse], int]:
+        """
+        List jobs with pagination.
+
+        Args:
+            page: Page number (1-indexed).
+            page_size: Jobs per page.
+            status_filter: Filter by status.
+
+        Returns:
+            Tuple of (jobs list, total count).
+        """
+        with self._lock:
+            # Filter jobs
+            jobs = list(self._jobs.values())
+            if status_filter:
+                jobs = [j for j in jobs if j.status == status_filter]
+
+            # Sort by created_at descending
+            jobs.sort(key=lambda j: j.created_at, reverse=True)
+
+            # Paginate
+            total = len(jobs)
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_jobs = jobs[start:end]
+
+            return [self._to_response(j) for j in page_jobs], total
+
+    def _to_response(self, job_state: JobState) -> JobResponse:
+        """
+        Convert internal JobState to JobResponse.
+
+        Args:
+            job_state: Internal job state.
+
+        Returns:
+            JobResponse for API output.
+        """
+        progress = None
+        if job_state.progress:
+            progress = ProgressResponse(
+                job_id=job_state.id,
+                phase=job_state.progress["phase"],
+                message=job_state.progress["message"],
+                progress_percent=job_state.progress["progress_percent"],
+                current_step=job_state.progress["current_step"],
+                total_steps=job_state.progress["total_steps"],
+                eta_seconds=job_state.progress.get("eta_seconds"),
+                preview=job_state.progress.get("preview"),
+                elapsed_seconds=job_state.progress.get("elapsed_seconds", 0),
+            )
+
+        result = None
+        if job_state.result:
+            result = self.get_result(job_state.id)
+
+        return JobResponse(
+            id=job_state.id,
+            status=job_state.status,
+            mode=job_state.mode,
+            created_at=job_state.created_at,
+            started_at=job_state.started_at,
+            completed_at=job_state.completed_at,
+            prompt=job_state.prompt,
+            file_ids=job_state.file_ids,
+            guidance=job_state.guidance,
+            progress=progress,
+            result=result,
+            error=job_state.error,
+        )

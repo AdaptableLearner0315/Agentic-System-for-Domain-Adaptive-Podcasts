@@ -17,7 +17,87 @@ An agentic podcast enhancement system that transforms raw audio into an engaging
 
 **Current state:** Full audio + visual pipeline is functional with advanced BGM generation. Final output is a video podcast with narrative-driven imagery and seamlessly evolving background music.
 
+**New in v2:** Normal Mode (~2 min generation) and Pro Mode (~6 min generation) with parallel execution, multi-format input support, and progress streaming.
+
+**New in v3:** Pro Mode enhancements with emotion mapping and multi-speaker support:
+- Emotion-responsive voice parameters (speed, emphasis per emotion)
+- Emotion-aligned image generation (color palette, lighting, mood)
+- Emotion validation across pipeline
+- Multi-speaker formats (Interview, Co-hosts, Narrator+Characters)
+- AI format detection with manual override
+
+**New in v4:** Prompt-to-Podcast flow with three input modes:
+- **Generation Mode**: Topic/prompt only → generate original content from scratch
+- **Enhancement Mode**: Files only → enhance existing content (backward compatible)
+- **Hybrid Mode**: Prompt + files → generate content informed by reference files
+- ContentGeneratorAgent: New agent that uses Claude to research and generate podcast-ready content
+- SmartInputHandler: Intelligent routing based on input type
+
 ## Architecture
+
+### High-Level Pipeline Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    SMART INPUT HANDLER                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  USER INPUT: --prompt "Topic" --files doc.pdf --guidance "Style"    │
+│                        │              │               │              │
+│                        ▼              ▼               ▼              │
+│               ┌─────────────────────────────────────────────┐       │
+│               │        SmartInputHandler.process()          │       │
+│               │                                             │       │
+│               │  IF prompt only:                            │       │
+│               │    → ContentGeneratorAgent.generate()       │       │
+│               │    → Pure generation from scratch           │       │
+│               │                                             │       │
+│               │  IF files only:                             │       │
+│               │    → InputRouter.extract() (existing)       │       │
+│               │    → Pure enhancement                       │       │
+│               │                                             │       │
+│               │  IF prompt + files:                         │       │
+│               │    → Extract files as reference             │       │
+│               │    → Generate content informed by files     │       │
+│               │    → Hybrid mode                            │       │
+│               └─────────────────────────────────────────────┘       │
+│                                    │                                 │
+│                                    ▼                                 │
+│              ExtractedContent { text, source_type, metadata }       │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    MODE SELECTOR                                     │
+│               Normal (fast) │ Pro (quality)                          │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+              ┌────────────────┴────────────────┐
+              ▼                                  ▼
+┌──────────────────────────┐    ┌──────────────────────────┐
+│     NORMAL PIPELINE      │    │      PRO PIPELINE        │
+│   Target: 90-120 sec     │    │   Target: 5-8 min        │
+│                          │    │                          │
+│ • Parallel execution     │    │ • Director review loop   │
+│ • Chunk-level TTS        │    │ • Sentence-level TTS     │
+│ • 3-segment BGM          │    │ • 9-segment daisy-chain  │
+│ • 4 library images       │    │ • 16 narrative images    │
+│ • No voice styling       │    │ • Full voice styling     │
+└──────────────────────────┘    └──────────────────────────┘
+              │                                  │
+              └────────────────┬────────────────┘
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PROGRESS STREAMING                                │
+│  Real-time updates • ETA estimation • Preview content               │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+                     Final Podcast Video (MP4)
+```
+
+### Detailed Component Architecture
 
 ```
                               run_pipeline.py
@@ -77,12 +157,71 @@ An agentic podcast enhancement system that transforms raw audio into an engaging
 
 ## Unified Entry Point: run_pipeline.py
 
-The main entry point provides subcommands for each pipeline stage:
+The main entry point provides subcommands for each pipeline stage, with support for **Normal** and **Pro** modes.
+
+### Quick Start - Three Input Modes
 
 ```bash
-# Run the full pipeline
-python run_pipeline.py full --input transcript.txt
+# ============================================
+# MODE 1: Pure Generation (prompt only)
+# ============================================
+# Generate podcast from a topic - no input files needed
+python run_pipeline.py full --prompt "The history of electronic music" --mode normal
+python run_pipeline.py full --prompt "AI breakthroughs in 2025" --guidance "For beginners" --mode pro
 
+# ============================================
+# MODE 2: Pure Enhancement (files only - backward compatible)
+# ============================================
+# Normal Mode - Fast generation (~2 minutes)
+python run_pipeline.py full --input transcript.txt --mode normal
+
+# Pro Mode - High quality generation (~6 minutes)
+python run_pipeline.py full --input transcript.txt --mode pro
+
+# Multi-format input support (PDF, Word, audio, video, URL)
+python run_pipeline.py full --input document.pdf --mode normal
+python run_pipeline.py full --input audio.mp3 --mode normal
+python run_pipeline.py full --input "https://example.com/article" --mode normal
+
+# Multiple files
+python run_pipeline.py full --files part1.txt part2.txt --mode pro
+
+# ============================================
+# MODE 3: Hybrid (prompt + files as context)
+# ============================================
+# Generate content informed by reference files
+python run_pipeline.py full --prompt "Quantum computing advances" --files research.pdf --mode pro
+python run_pipeline.py full --prompt "Key insights" --files paper1.pdf paper2.pdf --guidance "For general audience" --mode normal
+
+# With user guidance/context
+python run_pipeline.py full --input transcript.txt --guidance "Focus on the technical aspects" --mode normal
+
+# With custom configuration (Pro mode)
+python run_pipeline.py full --input transcript.txt --mode pro --config my_config.json
+
+# Configure user preferences
+python run_pipeline.py config
+```
+
+### Mode Comparison
+
+| Feature | Normal Mode | Pro Mode |
+|---------|-------------|----------|
+| **Target Time** | 90-120 seconds | 5-8 minutes |
+| **TTS Granularity** | Chunk-level (15 calls) | Sentence-level (80-100 calls) |
+| **BGM Segments** | 3 parallel | 9 daisy-chain |
+| **Images** | 4 key moments | 16 narrative |
+| **Director Review** | No | Yes (3 rounds) |
+| **Voice Styling** | Single adaptive | 5 personas |
+| **Emotion Voice Sync** | No | Yes (15 emotions) |
+| **Emotion Image Align** | No | Yes (color/mood) |
+| **Multi-Speaker** | No | Yes (4 formats) |
+| **Emotion Validation** | No | Yes |
+| **Parallelization** | Full (10 workers) | Partial |
+
+### Legacy Commands (Still Supported)
+
+```bash
 # Individual stages
 python run_pipeline.py enhance --input transcript.txt
 python run_pipeline.py audio --script Output/enhanced_script.json
@@ -148,6 +287,167 @@ The system uses 5 specialized agents that work together:
 - Cinematic photography style
 - 16:9 landscape format
 - 16 images total (2 hook + 14 modules)
+
+### 6. EmotionValidator (`agents/emotion_validator.py`)
+**Purpose:** Validates emotion consistency across pipeline
+
+- Validates all emotions are in supported list
+- Checks tension-emotion alignment
+- Validates emotion arc progression
+- Provides auto-fix suggestions
+
+### 7. SpeakerAssignmentAgent (`agents/speaker_assignment_agent.py`)
+**Purpose:** Assigns speakers for multi-speaker formats
+
+- Auto-detects speaker format from content
+- Supports manual override
+- Assigns voice IDs per speaker role
+- Handles interview, co-hosts, narrator+characters formats
+
+### 8. ContentGeneratorAgent (`agents/content_generator_agent.py`)
+**Purpose:** Generates original podcast content from topic prompts
+
+- Pure generation: Create content from topic/prompt alone
+- Hybrid generation: Create content informed by reference files
+- Length targets: short (600w), standard (1200w), long (2000w)
+- Uses Claude for research and content generation
+- Returns raw transcript (for ScriptDesignerAgent to structure)
+
+**Generation modes**:
+```python
+# Pure generation
+transcript = generator.generate(topic="History of AI")
+
+# With reference content
+transcript = generator.generate_with_context(
+    topic="Quantum computing",
+    reference_content=extracted_pdf_text,
+    guidance="For beginners"
+)
+
+# Expand existing content
+transcript = generator.expand_content(
+    content=existing_text,
+    guidance="More engaging and detailed"
+)
+```
+
+## Smart Input Handler (`utils/smart_input_handler.py`)
+
+Routes inputs intelligently based on what user provides:
+
+| Input | Mode | Handler |
+|-------|------|---------|
+| `--prompt` only | Generation | ContentGeneratorAgent |
+| `--files`/`--input` only | Enhancement | InputRouter (existing) |
+| `--prompt` + `--files` | Hybrid | Extract + Generate |
+
+**Usage**:
+```python
+from utils.smart_input_handler import SmartInputHandler, SmartInput
+
+handler = SmartInputHandler()
+
+# Pure generation
+content = handler.process(SmartInput(prompt="History of AI"))
+
+# Enhancement
+content = handler.process(SmartInput(files=["transcript.txt"]))
+
+# Hybrid
+content = handler.process(SmartInput(
+    prompt="Key insights",
+    files=["research.pdf"],
+    guidance="For beginners"
+))
+```
+
+## Emotion Mapping System (Pro Mode)
+
+Pro mode now supports comprehensive emotion mapping across voice, images, and validation.
+
+### Supported Emotions (15 total)
+
+| Emotion | Speed | Emphasis | Visual Style |
+|---------|-------|----------|--------------|
+| wonder | 0.95x | soft | ethereal blues, expansive |
+| curiosity | 1.00x | moderate | warm amber, inviting |
+| tension | 1.02x | moderate | stark contrasts, dramatic |
+| triumph | 1.05x | strong | warm golds, heroic |
+| melancholy | 0.90x | soft | muted blues, intimate |
+| intrigue | 0.98x | moderate | mysterious purples |
+| excitement | 1.10x | strong | vibrant, energetic |
+| reflection | 0.92x | soft | sepia, contemplative |
+| restlessness | 1.05x | moderate | edgy contrasts |
+| explosive_energy | 1.15x | strong | intense reds, powerful |
+| rebellion | 1.12x | strong | punk aesthetics, raw |
+| liberation | 1.08x | strong | open skies, freeing |
+| experimentation | 1.00x | moderate | creative, artistic |
+| mastery | 0.95x | moderate | sophisticated, refined |
+| intensity | 1.08x | strong | focused, powerful |
+
+### Emotion-Voice Flow
+
+```
+Script Emotion → TTS Speed Adjustment → Post-processing EQ/Compression → Final Voice
+```
+
+### Emotion-Image Flow
+
+```
+Chunk Emotion → Visual Style Lookup → Enhanced Prompt → Fal AI Flux → Emotion-aligned Image
+```
+
+## Multi-Speaker System (Pro Mode)
+
+Pro mode supports multiple speaker formats for diverse podcast styles.
+
+### Available Formats
+
+| Format | Speakers | Detection Patterns | Use Case |
+|--------|----------|-------------------|----------|
+| `single` | narrator | (default) | Documentary, storytelling |
+| `interview` | host, guest | Q:, A:, "interview" | Expert interviews |
+| `co_hosts` | host_1, host_2 | "we", "let's", "together" | Conversational podcasts |
+| `narrator_characters` | narrator, character | quotes, "said" | Narrative with dialogue |
+
+### Available Voices (MiniMax Speech-01-HD)
+
+| Voice Key | Voice ID | Description |
+|-----------|----------|-------------|
+| `female_friendly` | Friendly_Female_English | Warm, engaging |
+| `female_professional` | Professional_Female_English | Clear, authoritative |
+| `female_energetic` | Energetic_Female_English | Upbeat, dynamic |
+| `male_friendly` | Friendly_Male_English | Warm, approachable |
+| `male_professional` | Professional_Male_English | Clear, authoritative |
+| `male_energetic` | Energetic_Male_English | Upbeat, dynamic |
+
+### CLI Usage
+
+```bash
+# Auto-detect format
+python run_pipeline.py full --input interview.txt --mode pro
+
+# Specify format
+python run_pipeline.py full --input content.txt --mode pro --speaker-format interview
+
+# Manual voice assignment
+python run_pipeline.py full --input content.txt --mode pro \
+  --speaker-format interview \
+  --speakers host:female_friendly,guest:male_professional
+
+# Disable emotion features
+python run_pipeline.py full --input content.txt --mode pro --no-emotion-voice
+python run_pipeline.py full --input content.txt --mode pro --no-emotion-images
+```
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `config/emotion_voice_mapping.py` | Emotion → voice parameters |
+| `config/emotion_visual_mapping.py` | Emotion → visual style |
+| `config/speaker_config.py` | Speaker formats and voices |
 
 ## Voice Styles (Module-Specific)
 
@@ -221,6 +521,7 @@ The BGM system uses audio-to-audio conditioning where each segment feeds into th
 | `tts_narrator.py` | `TTSNarrator` | Generates speech using MiniMax Speech-01-HD (sentence-level) |
 | `music_generator.py` | `MusicGenerator` | Generates emotion-matched BGM using Fal AI stable-audio |
 | `image_generator.py` | `ImageGenerator` | Generates narrative-driven images using Fal AI Flux |
+| `content_generator_agent.py` | `ContentGeneratorAgent` | Generates original content from topic prompts |
 
 ### Utilities (`utils/`)
 | File | Purpose |
@@ -229,6 +530,7 @@ The BGM system uses audio-to-audio conditioning where each segment feeds into th
 | `voice_styles.py` | Module-specific voice style definitions and post-processing |
 | `audio_design_generator.py` | Generates audio design metadata |
 | `video_assembler.py` | Combines images + audio into video with crossfade transitions |
+| `smart_input_handler.py` | Routes inputs to appropriate mode (generate/enhance/hybrid) |
 
 ## Output Structure
 
@@ -511,6 +813,239 @@ The following files have been archived to `archive/` as they are superseded by n
 | `regenerate_bgm.py` | `advanced_bgm_pipeline_v2.py` |
 | `preview_module.py` | `generate_clean_preview.py` |
 
+## New in v2: Normal & Pro Mode System
+
+### New Directories
+
+| Directory | Purpose |
+|-----------|---------|
+| `pipelines/` | Normal and Pro pipeline implementations |
+| `assets/` | Pre-generated asset managers (voice, music, images) |
+| `utils/extractors/` | Multi-format input extractors |
+
+### New Files - Pipelines
+
+| File | Purpose |
+|------|---------|
+| `pipelines/normal_pipeline.py` | Fast 90-120 second generation pipeline |
+| `pipelines/pro_pipeline.py` | High-quality 5-8 minute generation pipeline |
+
+### New Files - Configuration
+
+| File | Purpose |
+|------|---------|
+| `config/modes.py` | Mode definitions (normal/pro settings) |
+| `config/user_config.py` | Save/load user preferences |
+
+### New Files - Utilities
+
+| File | Purpose |
+|------|---------|
+| `utils/parallel_executor.py` | Async batch execution with rate limiting |
+| `utils/input_router.py` | Multi-format input routing |
+| `utils/progress_stream.py` | Real-time progress streaming |
+
+### New Files - Extractors
+
+| File | Purpose |
+|------|---------|
+| `utils/extractors/text_extractor.py` | Plain text extraction |
+| `utils/extractors/pdf_extractor.py` | PDF document extraction |
+| `utils/extractors/word_extractor.py` | Word document (.docx) extraction |
+| `utils/extractors/audio_extractor.py` | Audio transcription via Whisper |
+| `utils/extractors/video_extractor.py` | Video audio extraction + transcription |
+| `utils/extractors/url_extractor.py` | Web article extraction |
+
+### New Files - Asset Managers
+
+| File | Purpose |
+|------|---------|
+| `assets/voice_manager.py` | Pre-generated voice phrase library |
+| `assets/music_manager.py` | Pre-generated music stem library |
+| `assets/image_manager.py` | Categorized image library |
+
+### Normal Mode Optimization Strategy
+
+The Normal mode achieves ~2 minute generation through:
+
+1. **Parallel Execution** (10 concurrent TTS, 3 BGM, 4 images)
+2. **Intelligent Reduction** (23 API calls vs 130+)
+3. **Chunk-level TTS** (15 chunks vs 80-100 sentences)
+4. **3-segment BGM** (parallel, no daisy-chain)
+5. **4 library images** (vs 16 generated)
+6. **No Director review loop**
+
+### Pro Mode Features
+
+The Pro mode maintains full quality through:
+
+1. **Director review loop** (up to 3 rounds)
+2. **Sentence-level TTS** (80-100 calls)
+3. **9-segment daisy-chain BGM** (sequential conditioning)
+4. **16 narrative images** (all custom generated)
+5. **5-persona voice styling**
+6. **VAD-based audio ducking**
+
+## New in v5: Web Interface (Frontend + Backend API)
+
+A modern web interface for the Nell Podcast System with:
+- **FastAPI Backend**: REST API + WebSocket for real-time progress
+- **React/Next.js Frontend**: Dark theme UI similar to Bolt.new
+- **Real-time Progress**: WebSocket-based progress streaming
+- **Comprehensive Testing**: Unit and integration tests
+
+### Web UI Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     FRONTEND (Next.js/React)                        │
+├─────────────────────────────────────────────────────────────────────┤
+│  PromptInput → FileUpload → ModeSelector → ProgressTracker          │
+│                                                                      │
+│  Hooks: useGeneration, useProgress, useFileUpload                   │
+│  State: job status, progress, result                                │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                    REST API + WebSocket
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     BACKEND (FastAPI)                               │
+├─────────────────────────────────────────────────────────────────────┤
+│  Routes:     /api/pipelines/*  /api/files/*  /api/config/*          │
+│  Services:   PipelineService   FileService   JobManager             │
+│  WebSocket:  /api/ws/{job_id}/progress                              │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                   EXISTING PIPELINES                                │
+│            NormalPipeline  │  ProPipeline                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Start - Web Interface
+
+```bash
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+
+# Open http://localhost:3000
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/pipelines/generate` | Start generation job |
+| `GET` | `/api/pipelines/{id}/status` | Get job progress |
+| `GET` | `/api/pipelines/{id}/result` | Get final result |
+| `POST` | `/api/pipelines/{id}/cancel` | Cancel running job |
+| `GET` | `/api/pipelines/` | List all jobs |
+| `POST` | `/api/files/upload` | Upload file |
+| `POST` | `/api/files/upload-url` | Extract from URL |
+| `GET` | `/api/files/{id}` | Get file info |
+| `DELETE` | `/api/files/{id}` | Delete file |
+| `GET` | `/api/config/modes` | Get mode configs |
+| `GET` | `/api/outputs/download/{id}` | Download output |
+| `WS` | `/api/ws/{id}/progress` | Real-time progress stream |
+
+### Backend Directory Structure
+
+```
+backend/
+├── app/
+│   ├── main.py                 # FastAPI app entry
+│   ├── config.py               # Pydantic settings
+│   ├── dependencies.py         # Dependency injection
+│   ├── routes/
+│   │   ├── pipelines.py        # /api/pipelines/*
+│   │   ├── files.py            # /api/files/*
+│   │   ├── config.py           # /api/config/*
+│   │   └── outputs.py          # /api/outputs/*
+│   ├── models/
+│   │   ├── requests.py         # Pydantic request models
+│   │   ├── responses.py        # Pydantic response models
+│   │   └── enums.py            # Shared enums
+│   ├── services/
+│   │   ├── pipeline_service.py # Pipeline orchestration
+│   │   ├── file_service.py     # File handling
+│   │   ├── job_manager.py      # Job state tracking
+│   │   └── progress_adapter.py # ProgressStream adapter
+│   └── websockets/
+│       └── progress.py         # Real-time updates
+├── tests/
+│   ├── conftest.py             # Shared fixtures
+│   ├── unit/                   # Unit tests
+│   └── integration/            # Integration tests
+└── requirements.txt
+```
+
+### Frontend Directory Structure
+
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx            # Main generation page
+│   │   ├── layout.tsx          # Root layout
+│   │   ├── globals.css         # Tailwind globals
+│   │   └── jobs/[id]/page.tsx  # Job result page
+│   ├── components/
+│   │   ├── PromptInput.tsx     # Main input area
+│   │   ├── FileUpload.tsx      # Drag-drop upload
+│   │   ├── ModeSelector.tsx    # Normal/Pro toggle
+│   │   ├── ProgressTracker.tsx # Real-time progress
+│   │   ├── OutputPlayer.tsx    # Video/audio player
+│   │   └── Header.tsx          # App header
+│   ├── hooks/
+│   │   ├── useGeneration.ts    # Generation state
+│   │   ├── useProgress.ts      # WebSocket progress
+│   │   └── useFileUpload.ts    # File upload logic
+│   ├── lib/
+│   │   ├── api.ts              # API client
+│   │   ├── websocket.ts        # WebSocket client
+│   │   └── utils.ts            # Utility functions
+│   └── types/
+│       └── index.ts            # TypeScript types
+├── package.json
+├── tailwind.config.js
+└── next.config.js
+```
+
+### Running Tests
+
+```bash
+# Backend unit tests
+cd backend
+pytest tests/unit -v
+
+# Backend integration tests
+pytest tests/integration -v
+
+# All tests with coverage
+pytest tests --cov=app --cov-report=html
+```
+
+### Environment Variables
+
+Add to `.env` for web interface:
+```
+# Backend
+CORS_ORIGINS=http://localhost:3000
+
+# Frontend (.env.local)
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WS_URL=ws://localhost:8000
+```
+
 ## Future Enhancements (Planned)
 
 - **SFX Selector**: Add sound effects based on keywords (volcanic, ice crack, etc.)
@@ -519,3 +1054,4 @@ The following files have been archived to `archive/` as they are superseded by n
 - **Subtitle Generation**: Auto-generate SRT subtitles synced to video
 - **Thumbnail Generator**: Auto-generate video thumbnail from key frames
 - **Multi-episode Support**: Batch processing for podcast series
+- **Asset Pre-generation CLI**: Command to pre-generate asset libraries
