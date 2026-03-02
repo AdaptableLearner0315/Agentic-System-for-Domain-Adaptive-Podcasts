@@ -70,14 +70,15 @@ export function useGeneration(): UseGenerationReturn {
   // WebSocket connection ref
   const wsRef = useRef<ProgressWebSocket | null>(null)
 
-  // Cleanup WebSocket on unmount
+  // Cleanup WebSocket on unmount or jobId change
   useEffect(() => {
     return () => {
       if (wsRef.current) {
         wsRef.current.disconnect()
+        wsRef.current = null
       }
     }
-  }, [])
+  }, [jobId])
 
   /**
    * Start a new generation job.

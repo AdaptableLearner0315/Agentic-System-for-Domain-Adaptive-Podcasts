@@ -19,15 +19,26 @@ SUBPROCESS_TIMEOUT = 120  # seconds
 
 
 def _run_subprocess(cmd, timeout=None, **kwargs):
-    """Run subprocess with timeout, raising RuntimeError on timeout."""
+    """Run subprocess with timeout, raising RuntimeError on failure."""
     effective_timeout = timeout or SUBPROCESS_TIMEOUT
     try:
-        return subprocess.run(cmd, timeout=effective_timeout, **kwargs)
+        result = subprocess.run(cmd, timeout=effective_timeout, **kwargs)
     except subprocess.TimeoutExpired:
         raise RuntimeError(
             f"FFmpeg process timed out after {effective_timeout}s. "
             f"Command: {' '.join(str(c) for c in cmd[:4])}..."
         )
+    if result.returncode != 0:
+        stderr_text = ""
+        if hasattr(result, 'stderr') and result.stderr:
+            stderr_text = result.stderr if isinstance(result.stderr, str) else result.stderr.decode('utf-8', errors='replace')
+            stderr_text = stderr_text.strip()[-500:]  # Last 500 chars
+        raise RuntimeError(
+            f"FFmpeg process failed with exit code {result.returncode}. "
+            f"Command: {' '.join(str(c) for c in cmd[:6])}... "
+            f"stderr: {stderr_text}"
+        )
+    return result
 
 
 def _detect_hw_encoder():
@@ -165,7 +176,13 @@ def get_audio_duration(audio_path: str) -> float:
         "-of", "default=noprint_wrappers=1:nokey=1",
         audio_path
     ], capture_output=True, text=True)
-    return float(result.stdout.strip())
+    try:
+        return float(result.stdout.strip())
+    except (ValueError, AttributeError) as e:
+        raise RuntimeError(
+            f"Could not determine audio duration for '{audio_path}'. "
+            f"ffprobe output: '{result.stdout.strip()}', stderr: '{result.stderr.strip()[:200]}'"
+        ) from e
 
 
 def create_ken_burns_clip(image_path: str, output_path: str, duration: float,

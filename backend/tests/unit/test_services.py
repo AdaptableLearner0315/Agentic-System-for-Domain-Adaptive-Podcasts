@@ -228,7 +228,8 @@ class TestFileService:
         mock_file = MagicMock()
         mock_file.filename = "test.txt"
         mock_file.content_type = "text/plain"
-        mock_file.read = AsyncMock(return_value=content)
+        # Simulate chunked reading: return content on first call, then b"" for EOF
+        mock_file.read = AsyncMock(side_effect=[content, b""])
 
         result = await file_service.upload_file(mock_file)
 

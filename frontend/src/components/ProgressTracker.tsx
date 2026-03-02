@@ -61,10 +61,13 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
   // Tick every second while generation is active
   useEffect(() => {
     const isTerminal = progress.phase === 'complete' || progress.phase === 'error'
-    if (isTerminal) return
+    if (isTerminal) {
+      setDisplayElapsed(0)
+      return
+    }
 
     const interval = setInterval(() => {
-      // Total elapsed
+      // Total elapsed - read from current ref values to avoid stale closures
       if (anchorRef.current) {
         const now = Date.now() / 1000
         const delta = now - anchorRef.current.anchoredAt
@@ -73,7 +76,7 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
         setDisplayElapsed((prev) => prev + 1)
       }
 
-      // Active phase elapsed
+      // Active phase elapsed - read from current ref values to avoid stale closures
       if (phaseAnchorRef.current) {
         const now = Date.now() / 1000
         const delta = now - phaseAnchorRef.current.anchoredAt

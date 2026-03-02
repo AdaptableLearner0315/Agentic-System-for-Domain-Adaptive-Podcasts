@@ -8,8 +8,9 @@ the existing InputRouter and extractor infrastructure.
 import os
 import uuid
 import shutil
+import re
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional
 import threading
 
@@ -34,6 +35,18 @@ EXTENSION_TO_TYPE = {
     ".avi": InputSourceType.VIDEO,
     ".mkv": InputSourceType.VIDEO,
 }
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent path traversal."""
+    # Extract just the filename part (no directory components)
+    filename = PurePosixPath(filename).name
+    # Remove any remaining path separators
+    filename = filename.replace("/", "").replace("\\", "")
+    # Remove dangerous characters, keep only safe ones
+    filename = re.sub(r'[^\w\s.\-]', '', filename)
+    # Limit length
+    return filename[:200] or "unnamed"
 
 
 class FileInfo:
@@ -139,22 +152,24 @@ class FileService:
         if not source_type:
             raise ValueError(f"Unsupported file type: {ext}")
 
-        # Create file path
-        safe_filename = f"{file_id}_{file.filename}"
+        # Create file path with sanitized filename
+        safe_filename = f"{file_id}_{_sanitize_filename(file.filename)}"
         file_path = self.upload_dir / safe_filename
 
-        # Read and save file
-        content = await file.read()
-
-        # Check file size
-        if len(content) > self.max_size_bytes:
-            raise ValueError(
-                f"File too large. Maximum size: {self.max_size_bytes // (1024*1024)}MB"
-            )
-
-        # Save file
-        with open(file_path, "wb") as f:
-            f.write(content)
+        # Stream file in chunks with size check
+        total_read = 0
+        chunk_size = 8192  # 8KB chunks
+        with open(file_path, 'wb') as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_read += len(chunk)
+                if total_read > self.max_size_bytes:
+                    f.close()
+                    file_path.unlink(missing_ok=True)
+                    raise ValueError(f"File too large. Maximum size: {self.max_size_bytes // (1024*1024)}MB")
+                f.write(chunk)
 
         # Extract text content
         extracted_text = await self._extract_text(file_path, source_type)
@@ -164,7 +179,7 @@ class FileService:
             id=file_id,
             filename=file.filename,
             content_type=file.content_type,
-            size_bytes=len(content),
+            size_bytes=total_read,
             source_type=source_type.value,
             path=file_path,
             extracted_text=extracted_text,

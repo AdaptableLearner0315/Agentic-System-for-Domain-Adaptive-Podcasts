@@ -69,14 +69,22 @@ async def download_output(
 
     if file_type == "video":
         if result.output_path:
-            file_path = Path(result.output_path)
+            file_path = Path(result.output_path).resolve()
+            # Validate path is within allowed directories
+            allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
+            if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
+                raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
             media_type = "video/mp4"
             filename = f"nell_podcast_{job_id}.mp4"
     elif file_type == "audio":
         # Look for audio file in result
         if result.output_path:
-            video_path = Path(result.output_path)
-            audio_path = video_path.parent / "audio" / f"{video_path.stem}.mp3"
+            video_path = Path(result.output_path).resolve()
+            audio_path = (video_path.parent / "audio" / f"{video_path.stem}.mp3").resolve()
+            # Validate path is within allowed directories
+            allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
+            if not any(str(audio_path).startswith(str(d)) for d in allowed_dirs):
+                raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
             if audio_path.exists():
                 file_path = audio_path
                 media_type = "audio/mpeg"
@@ -149,7 +157,12 @@ async def stream_video(
     if not result or not result.output_path:
         raise HTTPException(status_code=404, detail="Video not available")
 
-    file_path = Path(result.output_path)
+    settings = get_settings()
+    file_path = Path(result.output_path).resolve()
+    # Validate path is within allowed directories
+    allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
+    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
+        raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video file not found")
 
@@ -237,7 +250,12 @@ async def preview_asset(
             detail=f"Asset not found: {asset_type}/{asset_id}"
         )
 
-    file_path = Path(asset.path)
+    settings = get_settings()
+    file_path = Path(asset.path).resolve()
+    # Validate path is within allowed directories
+    allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
+    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
+        raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Asset file not found")
 
