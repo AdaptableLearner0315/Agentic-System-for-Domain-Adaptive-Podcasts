@@ -236,6 +236,22 @@ class JobManager:
                 return True
         return False
 
+    def delete_job(self, job_id: str) -> bool:
+        """
+        Delete a job from storage.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            True if job was found and deleted, False otherwise.
+        """
+        with self._lock:
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+                return True
+        return False
+
     def is_cancellation_requested(self, job_id: str) -> bool:
         """
         Check if cancellation was requested for a job.

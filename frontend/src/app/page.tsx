@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Header } from '@/components/Header'
 import { PromptInput } from '@/components/PromptInput'
 import { FileUpload } from '@/components/FileUpload'
@@ -81,6 +81,23 @@ export default function Home() {
     cancelGeneration,
     reset,
   } = useGeneration()
+
+  // Check for reuse data from History page on mount
+  useEffect(() => {
+    const reuseData = sessionStorage.getItem('nell_reuse_job')
+    if (reuseData) {
+      try {
+        const data = JSON.parse(reuseData)
+        if (data.prompt) setPrompt(data.prompt)
+        if (data.guidance) setGuidance(data.guidance)
+        if (data.mode) setMode(data.mode)
+      } catch {
+        // Ignore invalid JSON
+      }
+      // Clear after reading
+      sessionStorage.removeItem('nell_reuse_job')
+    }
+  }, [])
 
   /**
    * Handle form submission to start generation.

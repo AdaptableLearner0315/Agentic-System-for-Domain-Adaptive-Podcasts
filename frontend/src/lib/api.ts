@@ -132,6 +132,17 @@ export async function cancelJob(jobId: string): Promise<JobResponse> {
 }
 
 /**
+ * Delete a job from history.
+ *
+ * @param jobId - Job identifier
+ */
+export async function deleteJob(jobId: string): Promise<void> {
+  await request<{ message: string; id: string }>(`/api/pipelines/${jobId}`, {
+    method: 'DELETE',
+  })
+}
+
+/**
  * List all jobs with pagination.
  *
  * @param page - Page number

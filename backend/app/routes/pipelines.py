@@ -237,6 +237,38 @@ async def cancel_job(
     return job
 
 
+@router.delete(
+    "/{job_id}",
+    responses={
+        404: {"model": ErrorResponse, "description": "Job not found"},
+    },
+    summary="Delete a job",
+    description="Delete a generation job from history.",
+)
+async def delete_job(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> dict:
+    """
+    Delete a generation job from history.
+
+    Args:
+        job_id: Unique job identifier.
+        job_manager: Job management service.
+
+    Returns:
+        Confirmation message.
+
+    Raises:
+        HTTPException: If job is not found.
+    """
+    success = job_manager.delete_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    return {"message": "Job deleted", "id": job_id}
+
+
 @router.get(
     "/",
     response_model=JobListResponse,
