@@ -28,9 +28,8 @@ class Settings(BaseSettings):
         upload_dir: Directory for uploaded files
         output_dir: Directory for generated outputs
         max_upload_size_mb: Maximum file upload size
-        fal_key: Fal AI API key
+        fal_key: Fal AI API key (also used for MiniMax TTS via fal.ai)
         anthropic_api_key: Anthropic API key
-        minimax_api_key: MiniMax API key for TTS
     """
 
     # Application settings
@@ -50,7 +49,6 @@ class Settings(BaseSettings):
     # API Keys (loaded from .env)
     fal_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    minimax_api_key: Optional[str] = None
 
     # Job settings
     max_concurrent_jobs: int = 3
@@ -109,7 +107,6 @@ class Settings(BaseSettings):
         return {
             "fal_key": bool(self.fal_key),
             "anthropic_api_key": bool(self.anthropic_api_key),
-            "minimax_api_key": bool(self.minimax_api_key),
         }
 
     class Config:

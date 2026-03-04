@@ -23,6 +23,7 @@ from ..models.requests import GenerationRequest
 from ..config import get_settings
 from .job_manager import JobManager
 from .progress_adapter import adapter_manager, ProgressUpdate as AdapterProgressUpdate
+from .trailer_service import TrailerService
 from ..logging_config import get_logger
 
 logger = get_logger("pipeline")
@@ -338,6 +339,81 @@ class PipelineService:
             self.job_manager.fail_job(job_id, f"Content preparation failed: {e}")
             return None
 
+    def _create_on_script_ready_callback(self, job_id: str):
+        """
+        Create callback for when script is ready.
+
+        Launches trailer generation as fire-and-forget task.
+
+        Args:
+            job_id: Job identifier.
+
+        Returns:
+            Callback function that receives (pipeline_job_id, script).
+        """
+        def on_script_ready(pipeline_job_id: str, script: Dict[str, Any]):
+            """Fire-and-forget trailer generation."""
+            logger.info(f"Script ready for job {job_id}, launching trailer generation")
+            asyncio.create_task(
+                self._generate_trailer_preview(job_id, script)
+            )
+
+        return on_script_ready
+
+    async def _generate_trailer_preview(self, job_id: str, script: Dict[str, Any]):
+        """
+        Generate and broadcast trailer preview.
+
+        This runs as a fire-and-forget task. Failures are logged but
+        do not affect the main pipeline.
+
+        Args:
+            job_id: Job identifier.
+            script: Enhanced script dictionary.
+        """
+        try:
+            trailer_service = TrailerService(job_id, self.output_dir)
+
+            # Hard timeout to ensure trailer doesn't run past main pipeline
+            result = await asyncio.wait_for(
+                trailer_service.generate_trailer(script),
+                timeout=20.0
+            )
+
+            if result.success:
+                # Broadcast trailer ready via WebSocket
+                await self._broadcast_trailer_ready(job_id, result)
+                logger.info(f"Trailer ready for job {job_id}: {result.video_path or result.audio_path}")
+            else:
+                logger.warning(f"Trailer generation failed for job {job_id}: {result.error}")
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Trailer generation timed out for job {job_id}")
+        except Exception as e:
+            logger.warning(f"Trailer generation error for job {job_id}: {e}")
+
+    async def _broadcast_trailer_ready(self, job_id: str, result):
+        """
+        Broadcast trailer ready message via WebSocket.
+
+        Args:
+            job_id: Job identifier.
+            result: TrailerResult with paths and duration.
+        """
+        from ..websockets.progress import manager
+
+        # Determine URL path for trailer
+        trailer_url = f"/api/trailer/{job_id}"
+
+        message = {
+            "type": "trailer_ready",
+            "job_id": job_id,
+            "trailer_url": trailer_url,
+            "duration_seconds": result.duration_seconds,
+        }
+
+        await manager.broadcast(job_id, message)
+
     def _create_progress_callback(self, job_id: str, adapter):
         """
         Create a progress callback for pipeline execution.
@@ -439,9 +515,16 @@ class PipelineService:
             progress_callback = self._create_progress_callback(job_id, adapter)
             progress = ProgressStream(callback=progress_callback)
 
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
             # Run pipeline (pass job_id to isolate outputs per job)
             pipeline = NormalPipeline(job_id=job_id)
-            result = await pipeline.run_with_content(content, progress=progress)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready
+            )
 
             return self._convert_result_to_dict(result)
 
@@ -477,9 +560,16 @@ class PipelineService:
             progress_callback = self._create_progress_callback(job_id, adapter)
             progress = ProgressStream(callback=progress_callback)
 
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
             # Run pipeline
             pipeline = ProPipeline(config=config)
-            result = await pipeline.run_with_content(content, progress=progress)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready
+            )
 
             return self._convert_result_to_dict(
                 result,

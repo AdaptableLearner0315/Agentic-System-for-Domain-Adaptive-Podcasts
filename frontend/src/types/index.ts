@@ -295,6 +295,7 @@ export type WebSocketMessageType =
   | 'heartbeat'
   | 'ping'
   | 'pong'
+  | 'trailer_ready'
 
 /**
  * WebSocket message structure.
@@ -316,6 +317,16 @@ export interface WebSocketMessage {
   duration_seconds?: number
   details?: Record<string, unknown>
   error?: string
+  // Trailer-specific fields
+  trailer_url?: string
+}
+
+/**
+ * Trailer preview data.
+ */
+export interface TrailerData {
+  url: string
+  duration_seconds: number
 }
 
 /**
@@ -384,3 +395,9 @@ export interface VoiceConfigResponse {
   voices: Record<string, VoicePreset>
   default: string
 }
+
+// =============================================================================
+// Interactive Chat Types (re-exported)
+// =============================================================================
+
+export * from './interactive'

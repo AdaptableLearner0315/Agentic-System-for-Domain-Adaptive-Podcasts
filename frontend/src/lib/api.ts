@@ -16,6 +16,11 @@ import type {
   HealthResponse,
   ErrorResponse,
   URLExtractionRequest,
+  SessionResponse,
+  MessageRequest,
+  MessageResponse,
+  HistoryResponse,
+  TranscriptionResponse,
 } from '@/types'
 
 // API base URL from environment
@@ -323,4 +328,123 @@ export function getDownloadUrl(
  */
 export function getStreamUrl(jobId: string): string {
   return `${API_URL}/api/outputs/stream/${jobId}`
+}
+
+// =============================================================================
+// Interactive Chat Endpoints
+// =============================================================================
+
+/**
+ * Start an interactive conversation session.
+ *
+ * @param jobId - Podcast job ID
+ * @returns Session response with session ID and welcome message
+ */
+export async function startInteractiveSession(jobId: string): Promise<SessionResponse> {
+  return request<SessionResponse>(`/api/interactive/${jobId}/session`, {
+    method: 'POST',
+  })
+}
+
+/**
+ * Send a text message in an interactive session.
+ *
+ * @param jobId - Podcast job ID
+ * @param data - Message request data
+ * @returns Message response with user and assistant messages
+ */
+export async function sendInteractiveMessage(
+  jobId: string,
+  data: MessageRequest
+): Promise<MessageResponse> {
+  return request<MessageResponse>(`/api/interactive/${jobId}/message`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
+ * Send a voice message in an interactive session.
+ *
+ * @param jobId - Podcast job ID
+ * @param audioBlob - Audio blob to upload
+ * @param generateAudio - Whether to generate TTS response
+ * @returns Transcription response
+ */
+export async function sendVoiceMessage(
+  jobId: string,
+  audioBlob: Blob,
+  generateAudio: boolean = true
+): Promise<TranscriptionResponse> {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'recording.webm')
+
+  const params = new URLSearchParams({ generate_audio: generateAudio.toString() })
+
+  const response = await fetch(
+    `${API_URL}/api/interactive/${jobId}/voice?${params}`,
+    {
+      method: 'POST',
+      body: formData,
+    }
+  )
+
+  if (!response.ok) {
+    let errorData: ErrorResponse | null = null
+    try {
+      errorData = await response.json()
+    } catch {
+      // Response may not be JSON
+    }
+    throw new ApiError(
+      errorData?.message || 'Voice upload failed',
+      response.status,
+      errorData?.details
+    )
+  }
+
+  return response.json()
+}
+
+/**
+ * Get conversation history for an interactive session.
+ *
+ * @param jobId - Podcast job ID
+ * @returns History response with all messages
+ */
+export async function getInteractiveHistory(jobId: string): Promise<HistoryResponse> {
+  return request<HistoryResponse>(`/api/interactive/${jobId}/history`)
+}
+
+/**
+ * End an interactive session.
+ *
+ * @param jobId - Podcast job ID
+ */
+export async function endInteractiveSession(jobId: string): Promise<void> {
+  await request<{ message: string; session_id: string }>(
+    `/api/interactive/${jobId}/session`,
+    { method: 'DELETE' }
+  )
+}
+
+/**
+ * Get session info for a job.
+ *
+ * @param jobId - Podcast job ID
+ * @returns Session info or null if no active session
+ */
+export async function getInteractiveSessionInfo(
+  jobId: string
+): Promise<{ session_id: string; is_active: boolean } | null> {
+  try {
+    return await request<{ session_id: string; is_active: boolean }>(
+      `/api/interactive/${jobId}/session`
+    )
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return null
+    }
+    throw e
+  }
 }

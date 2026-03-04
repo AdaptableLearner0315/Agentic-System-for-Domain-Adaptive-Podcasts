@@ -188,7 +188,8 @@ class NormalPipeline:
     async def run_with_content(
         self,
         content: ExtractedContent,
-        progress: Optional[ProgressStream] = None
+        progress: Optional[ProgressStream] = None,
+        on_script_ready: Optional[callable] = None
     ) -> NormalPipelineResult:
         """
         Run the pipeline with pre-extracted content.
@@ -199,6 +200,9 @@ class NormalPipeline:
         Args:
             content: Pre-extracted/generated content
             progress: Optional progress stream for updates
+            on_script_ready: Optional callback called when script is enhanced.
+                             Receives (job_id, script_dict) arguments.
+                             Used for fire-and-forget trailer generation.
 
         Returns:
             NormalPipelineResult with all outputs
@@ -211,13 +215,14 @@ class NormalPipeline:
 
         print(f"[NormalPipeline] Using pre-processed content: {len(content.text)} characters from {content.source_type}")
 
-        return await self._run_with_content(content, progress, start_time)
+        return await self._run_with_content(content, progress, start_time, on_script_ready)
 
     async def _run_with_content(
         self,
         content: ExtractedContent,
         progress: Optional[ProgressStream],
-        start_time: float
+        start_time: float,
+        on_script_ready: Optional[callable] = None
     ) -> NormalPipelineResult:
         """
         Internal method that orchestrates the full pipeline after content extraction.
@@ -232,6 +237,8 @@ class NormalPipeline:
             progress: Optional progress stream for real-time UI updates.
             start_time: ``time.time()`` captured before content extraction,
                 used for total duration calculation.
+            on_script_ready: Optional callback called when script is enhanced.
+                             Receives (job_id, script_dict) arguments.
 
         Returns:
             NormalPipelineResult with output paths, script, assets, and timing.
@@ -252,6 +259,13 @@ class NormalPipeline:
             if progress:
                 hook_preview = script.get("hook", {}).get("text", "")[:100]
                 progress.scripting("Script enhanced!", preview=hook_preview)
+
+            # Fire-and-forget: notify callback that script is ready (for trailer generation)
+            if on_script_ready:
+                try:
+                    on_script_ready(self.job_id, script)
+                except Exception as e:
+                    print(f"[NormalPipeline] on_script_ready callback failed: {e}")
 
             # Stage 2+3+4: Assets + Mix + Video (overlapped)
             tts_results, bgm_results, image_results, final_audio, final_video, asset_timings = \

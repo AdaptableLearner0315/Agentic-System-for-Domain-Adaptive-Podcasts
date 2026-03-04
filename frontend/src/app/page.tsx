@@ -8,6 +8,7 @@ import { ModeSelector } from '@/components/ModeSelector'
 import { DurationSelector } from '@/components/DurationSelector'
 import { ProgressTracker } from '@/components/ProgressTracker'
 import { OutputPlayer } from '@/components/OutputPlayer'
+import { TrailerPreview } from '@/components/TrailerPreview'
 import { useGeneration } from '@/hooks/useGeneration'
 import { STORAGE_KEYS } from '@/lib/constants'
 import { PipelineMode, DurationOption } from '@/types'
@@ -80,10 +81,14 @@ export default function Home() {
     progress,
     result,
     error,
+    trailer,
     startGeneration,
     cancelGeneration,
     reset,
   } = useGeneration()
+
+  // Track whether user dismissed trailer to view full result
+  const [showTrailer, setShowTrailer] = useState(true)
 
   // Check for reuse data from History page on mount
   useEffect(() => {
@@ -132,6 +137,7 @@ export default function Home() {
     setGuidance('')
     setDuration('auto')
     setUploadedFiles([])
+    setShowTrailer(true)
     reset()
   }
 
@@ -145,7 +151,7 @@ export default function Home() {
     <main className="min-h-screen">
       <Header />
 
-      <div className="container mx-auto px-4 py-12 max-w-xl">
+      <div className={`container mx-auto px-4 py-12 ${isComplete ? 'max-w-6xl' : 'max-w-xl'}`}>
         {/* Title */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold gradient-text mb-2">
@@ -267,6 +273,18 @@ export default function Home() {
         {isGenerating && progress && (
           <div className="mt-6 animate-in">
             <ProgressTracker progress={progress} />
+          </div>
+        )}
+
+        {/* Trailer Preview - shows while full podcast is generating */}
+        {trailer && showTrailer && !result && isGenerating && (
+          <div className="mt-6 animate-in">
+            <TrailerPreview
+              trailerUrl={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${trailer.url}`}
+              duration={trailer.duration_seconds}
+              isFullReady={!!result}
+              onViewFull={() => setShowTrailer(false)}
+            />
           </div>
         )}
 

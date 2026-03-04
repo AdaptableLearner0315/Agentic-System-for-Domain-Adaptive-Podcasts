@@ -144,7 +144,7 @@ describe('ComponentName', () => {
 ### Backend (pytest)
 - File: `test_<module>.py` in `tests/unit/`
 - Use fixtures in `conftest.py` for shared setup
-- Mock external APIs (fal, anthropic, minimax)
+- Mock external APIs (fal, anthropic)
 - Test edge cases and error paths
 
 Example:
@@ -340,7 +340,6 @@ N. **<Short description>**: <Root cause> → <Fix applied>
 ```bash
 FAL_KEY=your-fal-ai-key
 ANTHROPIC_API_KEY=your-anthropic-key
-MINIMAX_API_KEY=your-minimax-key
 ```
 
 ### Backend Environment

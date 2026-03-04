@@ -1,15 +1,18 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { ResultResponse } from '@/types'
 import { API_URL } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
+import { ChatPanel } from './interactive'
 
 interface OutputPlayerProps {
   /** Generation result data */
   result: ResultResponse
   /** Callback to reset and start over */
   onReset: () => void
+  /** Whether to show the interactive chat panel */
+  showChat?: boolean
 }
 
 /**
@@ -21,10 +24,27 @@ interface OutputPlayerProps {
  * @param result - Generation result with video URLs
  * @param onReset - Callback to reset the form
  */
-export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
+export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerProps) {
   const [activeTab, setActiveTab] = useState<'video' | 'details'>('video')
   const [isMuted, setIsMuted] = useState(true)
+  const [isChatOpen, setIsChatOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  /**
+   * Pause video when user interacts with chat.
+   */
+  const handleChatInteraction = useCallback(() => {
+    if (videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause()
+    }
+  }, [])
+
+  /**
+   * Toggle chat panel visibility.
+   */
+  const toggleChat = useCallback(() => {
+    setIsChatOpen((prev) => !prev)
+  }, [])
 
   /**
    * Handle video download.
@@ -52,33 +72,60 @@ export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
     : null
 
   return (
-    <div className="card space-y-6">
-      {/* Success Header */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
-          <svg
-            className="w-6 h-6 text-success"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
+    <div className={`flex ${isChatOpen ? 'gap-4' : ''}`}>
+      {/* Main content area */}
+      <div className={`card space-y-6 ${isChatOpen ? 'flex-[7]' : 'w-full'}`}>
+        {/* Success Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
+              <svg
+                className="w-6 h-6 text-success"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-xl font-bold">Your Podcast is Ready!</h3>
+              <p className="text-muted-foreground">
+                {result.duration_seconds
+                  ? `Duration: ${formatDuration(result.duration_seconds)}`
+                  : 'Generation complete'}
+              </p>
+            </div>
+          </div>
+
+          {/* Chat toggle button */}
+          {showChat && !isChatOpen && (
+            <button
+              className="btn-outline flex items-center gap-2"
+              onClick={toggleChat}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+              Chat
+            </button>
+          )}
         </div>
-        <div>
-          <h3 className="text-xl font-bold">Your Podcast is Ready!</h3>
-          <p className="text-muted-foreground">
-            {result.duration_seconds
-              ? `Duration: ${formatDuration(result.duration_seconds)}`
-              : 'Generation complete'}
-          </p>
-        </div>
-      </div>
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-border pb-2">
@@ -273,6 +320,20 @@ export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
           Create Another Podcast
         </button>
       </div>
+      </div>
+
+      {/* Chat Panel (side-by-side on desktop, hidden until toggled) */}
+      {showChat && isChatOpen && (
+        <div className="flex-[3] min-w-[300px] max-w-[400px] h-[600px] rounded-lg overflow-hidden border border-border">
+          <ChatPanel
+            jobId={result.job_id}
+            isVisible={isChatOpen}
+            onClose={() => setIsChatOpen(false)}
+            onInteraction={handleChatInteraction}
+            enableVoice={false}
+          />
+        </div>
+      )}
     </div>
   )
 }

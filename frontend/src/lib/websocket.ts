@@ -5,7 +5,7 @@
  * and message handling.
  */
 
-import type { WebSocketMessage, ProgressResponse } from '@/types'
+import type { WebSocketMessage, ProgressResponse, TrailerData } from '@/types'
 
 // WebSocket base URL from environment
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'
@@ -41,6 +41,11 @@ export type ErrorCallback = (error: string) => void
 export type StateCallback = (state: ConnectionState) => void
 
 /**
+ * Callback type for trailer ready.
+ */
+export type TrailerCallback = (data: TrailerData) => void
+
+/**
  * WebSocket connection manager for job progress.
  *
  * Handles connection lifecycle, message parsing, and reconnection.
@@ -52,6 +57,7 @@ export class ProgressWebSocket {
   private onComplete?: CompleteCallback
   private onError?: ErrorCallback
   private onStateChange?: StateCallback
+  private onTrailerReady?: TrailerCallback
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
@@ -96,6 +102,14 @@ export class ProgressWebSocket {
    */
   setStateCallback(callback: StateCallback): this {
     this.onStateChange = callback
+    return this
+  }
+
+  /**
+   * Set trailer ready callback.
+   */
+  setTrailerCallback(callback: TrailerCallback): this {
+    this.onTrailerReady = callback
     return this
   }
 
@@ -220,6 +234,15 @@ export class ProgressWebSocket {
           this.disconnect()
           break
 
+        case 'trailer_ready':
+          if (this.onTrailerReady && message.trailer_url) {
+            this.onTrailerReady({
+              url: message.trailer_url,
+              duration_seconds: message.duration_seconds || 0,
+            })
+          }
+          break
+
         case 'heartbeat':
         case 'pong':
           // Keep-alive messages, no action needed
@@ -280,6 +303,7 @@ export function createProgressConnection(
     onComplete?: CompleteCallback
     onError?: ErrorCallback
     onStateChange?: StateCallback
+    onTrailerReady?: TrailerCallback
   }
 ): ProgressWebSocket {
   const ws = new ProgressWebSocket(jobId)
@@ -288,6 +312,7 @@ export function createProgressConnection(
   if (callbacks.onComplete) ws.setCompleteCallback(callbacks.onComplete)
   if (callbacks.onError) ws.setErrorCallback(callbacks.onError)
   if (callbacks.onStateChange) ws.setStateCallback(callbacks.onStateChange)
+  if (callbacks.onTrailerReady) ws.setTrailerCallback(callbacks.onTrailerReady)
 
   ws.connect()
   return ws

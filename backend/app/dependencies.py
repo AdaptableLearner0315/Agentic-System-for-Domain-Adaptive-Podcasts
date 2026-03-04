@@ -16,12 +16,14 @@ from .database.repository import JobRepository
 from .services.job_manager import JobManager
 from .services.file_service import FileService
 from .services.pipeline_service import PipelineService
+from .services.conversation_service import ConversationService
 
 
 # Global service instances (initialized on first use)
 _job_manager: JobManager | None = None
 _file_service: FileService | None = None
 _pipeline_service: PipelineService | None = None
+_conversation_service: ConversationService | None = None
 
 
 def get_job_manager() -> JobManager:
@@ -130,13 +132,30 @@ async def get_job_repository(
             await session.close()
 
 
+def get_conversation_service() -> ConversationService:
+    """
+    Get the ConversationService singleton instance.
+
+    The ConversationService manages interactive podcast conversations,
+    handling chat sessions and Claude integration.
+
+    Returns:
+        ConversationService instance.
+    """
+    global _conversation_service
+    if _conversation_service is None:
+        _conversation_service = ConversationService()
+    return _conversation_service
+
+
 def reset_services() -> None:
     """
     Reset all service singletons.
 
     Used for testing to ensure clean state between tests.
     """
-    global _job_manager, _file_service, _pipeline_service
+    global _job_manager, _file_service, _pipeline_service, _conversation_service
     _job_manager = None
     _file_service = None
     _pipeline_service = None
+    _conversation_service = None

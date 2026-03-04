@@ -202,7 +202,8 @@ class ProPipeline:
     async def run_with_content(
         self,
         content: ExtractedContent,
-        progress: Optional[ProgressStream] = None
+        progress: Optional[ProgressStream] = None,
+        on_script_ready: Optional[callable] = None
     ) -> ProPipelineResult:
         """
         Run the pipeline with pre-extracted content.
@@ -213,6 +214,9 @@ class ProPipeline:
         Args:
             content: Pre-extracted/generated content
             progress: Optional progress stream for updates
+            on_script_ready: Optional callback called when script is enhanced.
+                             Receives (job_id, script_dict) arguments.
+                             Used for fire-and-forget trailer generation.
 
         Returns:
             ProPipelineResult with all outputs
@@ -225,13 +229,14 @@ class ProPipeline:
 
         print(f"[ProPipeline] Using pre-processed content: {len(content.text)} characters from {content.source_type}")
 
-        return await self._run_with_content(content, progress, start_time)
+        return await self._run_with_content(content, progress, start_time, on_script_ready)
 
     async def _run_with_content(
         self,
         content: ExtractedContent,
         progress: Optional[ProgressStream],
-        start_time: float
+        start_time: float,
+        on_script_ready: Optional[callable] = None
     ) -> ProPipelineResult:
         """
         Internal method to run pipeline with content.
@@ -240,11 +245,16 @@ class ProPipeline:
             content: Extracted content
             progress: Progress stream
             start_time: Pipeline start time
+            on_script_ready: Optional callback called when script is enhanced.
 
         Returns:
             ProPipelineResult
         """
         import time
+        import uuid
+
+        # Generate a job_id for ProPipeline (similar to NormalPipeline)
+        job_id = str(uuid.uuid4())[:8]
 
         tts_results = []
         bgm_results = []
@@ -261,6 +271,13 @@ class ProPipeline:
             script, review_history = await self._enhance_script_with_review(
                 content, progress
             )
+
+            # Fire-and-forget: notify callback that script is ready (for trailer generation)
+            if on_script_ready:
+                try:
+                    on_script_ready(job_id, script)
+                except Exception as e:
+                    print(f"[ProPipeline] on_script_ready callback failed: {e}")
 
             # Stage 2.5: Emotion validation + Speaker assignment IN PARALLEL
             # Both are independent reads of the script; emotion fixes are applied

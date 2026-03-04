@@ -14,6 +14,7 @@ import type {
   JobStatus,
   ProgressResponse,
   ResultResponse,
+  TrailerData,
 } from '@/types'
 
 /**
@@ -32,6 +33,8 @@ interface UseGenerationReturn {
   jobId: string | null
   /** Whether a job is currently running */
   isLoading: boolean
+  /** Trailer preview data (available before full result) */
+  trailer: TrailerData | null
   /** Start a new generation */
   startGeneration: (request: GenerationRequest) => Promise<void>
   /** Cancel the current job */
@@ -67,6 +70,7 @@ export function useGeneration(): UseGenerationReturn {
   const [result, setResult] = useState<ResultResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
+  const [trailer, setTrailer] = useState<TrailerData | null>(null)
 
   // WebSocket connection ref
   const wsRef = useRef<ProgressWebSocket | null>(null)
@@ -155,6 +159,10 @@ export function useGeneration(): UseGenerationReturn {
           setError(null)
         }
       },
+      onTrailerReady: (trailerData) => {
+        // Trailer preview is ready - show it to user while full podcast generates
+        setTrailer(trailerData)
+      },
     })
     wsRef.current = ws
 
@@ -173,6 +181,7 @@ export function useGeneration(): UseGenerationReturn {
     setError(null)
     setResult(null)
     setProgress(null)
+    setTrailer(null)
 
     try {
       // Create job via API
@@ -231,6 +240,7 @@ export function useGeneration(): UseGenerationReturn {
     setResult(null)
     setError(null)
     setJobId(null)
+    setTrailer(null)
   }, [])
 
   return {
@@ -240,6 +250,7 @@ export function useGeneration(): UseGenerationReturn {
     error,
     jobId,
     isLoading: status === 'pending' || status === 'running',
+    trailer,
     startGeneration: handleStartGeneration,
     cancelGeneration: handleCancelGeneration,
     reset: handleReset,
