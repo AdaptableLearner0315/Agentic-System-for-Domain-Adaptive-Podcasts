@@ -289,6 +289,15 @@ export async function getEmotions(): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>('/api/config/emotions')
 }
 
+/**
+ * Get an AI-suggested podcast topic.
+ *
+ * @returns Object with a suggested topic string
+ */
+export async function suggestTopic(): Promise<{ topic: string }> {
+  return request<{ topic: string }>('/api/config/suggest-topic')
+}
+
 // =============================================================================
 // Health Endpoint
 // =============================================================================

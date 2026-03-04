@@ -5,12 +5,18 @@ Handles:
 - GET /modes: Get available pipeline modes
 - GET /formats: Get supported file formats
 - GET /voices: Get available voice presets
+- GET /suggest-topic: Get an AI-suggested podcast topic
 """
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, HTTPException
+from anthropic import AsyncAnthropic
 
 from ..models.responses import ConfigResponse, ModeConfig
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -190,3 +196,57 @@ async def get_speaker_formats() -> dict:
         },
         "default": "auto",
     }
+
+
+@router.get(
+    "/suggest-topic",
+    summary="Suggest a podcast topic",
+    description="Use Claude to suggest a creative, trending podcast topic.",
+)
+async def suggest_topic() -> dict:
+    """
+    Generate a creative podcast topic suggestion using Claude.
+
+    Returns:
+        Dictionary with a single 'topic' key containing the suggestion.
+
+    Raises:
+        HTTPException 503: If Anthropic API key is not configured.
+        HTTPException 500: If Claude API call fails.
+    """
+    settings = get_settings()
+
+    if not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Anthropic API key is not configured.",
+        )
+
+    try:
+        client = AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=30.0)
+
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=200,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Suggest ONE creative, specific, and trending podcast topic. "
+                        "It should be interesting, timely, and appeal to a broad audience. "
+                        "Reply with ONLY the topic as a short phrase (under 15 words), "
+                        "nothing else. No quotes, no explanation."
+                    ),
+                }
+            ],
+        )
+
+        topic = response.content[0].text.strip()
+        return {"topic": topic}
+
+    except Exception as e:
+        logger.error("Failed to suggest topic: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate topic suggestion.",
+        )

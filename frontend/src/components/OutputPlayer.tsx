@@ -5,6 +5,7 @@ import { ResultResponse } from '@/types'
 import { API_URL } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 import { ChatPanel } from './interactive'
+import { ChatDrawer } from './ChatDrawer'
 
 interface OutputPlayerProps {
   /** Generation result data */
@@ -72,9 +73,9 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
     : null
 
   return (
-    <div className={`flex ${isChatOpen ? 'gap-4' : ''}`}>
+    <div className="w-full">
       {/* Main content area */}
-      <div className={`card space-y-6 ${isChatOpen ? 'flex-[7]' : 'w-full'}`}>
+      <div className="card space-y-6">
         {/* Success Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -103,14 +104,15 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
             </div>
           </div>
 
-          {/* Chat toggle button */}
-          {showChat && !isChatOpen && (
+          {/* Hamburger menu toggle for chat */}
+          {showChat && (
             <button
-              className="btn-outline flex items-center gap-2"
+              className="p-2 rounded-lg hover:bg-secondary transition-colors"
               onClick={toggleChat}
+              aria-label="Toggle chat"
             >
               <svg
-                className="w-4 h-4"
+                className="w-6 h-6 text-muted-foreground"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -119,10 +121,9 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  d="M4 6h16M4 12h16M4 18h16"
                 />
               </svg>
-              Chat
             </button>
           )}
         </div>
@@ -322,17 +323,17 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
       </div>
       </div>
 
-      {/* Chat Panel (side-by-side on desktop, hidden until toggled) */}
-      {showChat && isChatOpen && (
-        <div className="flex-[3] min-w-[300px] max-w-[400px] h-[600px] rounded-lg overflow-hidden border border-border">
+      {/* Chat Drawer - always mounted to preserve session */}
+      {showChat && (
+        <ChatDrawer isOpen={isChatOpen} onClose={() => setIsChatOpen(false)}>
           <ChatPanel
             jobId={result.job_id}
-            isVisible={isChatOpen}
+            isVisible={true}
             onClose={() => setIsChatOpen(false)}
             onInteraction={handleChatInteraction}
             enableVoice={false}
           />
-        </div>
+        </ChatDrawer>
       )}
     </div>
   )
