@@ -7,10 +7,11 @@ Provides common functionality for LLM interaction, JSON parsing, and output mana
 """
 
 import json
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Dict, Any
-from anthropic import Anthropic
+from anthropic import Anthropic, APITimeoutError, APIStatusError
 
 
 class BaseAgent(ABC):
@@ -40,7 +41,7 @@ class BaseAgent(ABC):
         """
         self.name = name
         self.model = model
-        self.client = Anthropic()
+        self.client = Anthropic(timeout=120.0)
 
         # Set up output directory
         base_output = Path(__file__).parent.parent / "Output"
@@ -70,15 +71,20 @@ class BaseAgent(ABC):
         self,
         prompt: str,
         max_tokens: int = 4096,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        max_retries: int = 2
     ) -> str:
         """
         Call the LLM with the given prompt.
+
+        Retries up to max_retries times with exponential backoff on
+        timeout, rate limit (429), and server errors (500/503).
 
         Args:
             prompt: User prompt
             max_tokens: Maximum tokens in response
             system_prompt: Optional system prompt
+            max_retries: Number of retry attempts (default 2)
 
         Returns:
             Raw response text from LLM
@@ -94,8 +100,27 @@ class BaseAgent(ABC):
         if system_prompt:
             kwargs["system"] = system_prompt
 
-        response = self.client.messages.create(**kwargs)
-        return response.content[0].text
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.messages.create(**kwargs)
+                return response.content[0].text
+            except APITimeoutError as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = 2 ** attempt
+                    self.log(f"Timeout, retrying in {delay}s (attempt {attempt + 1}/{max_retries})", level="warning")
+                    time.sleep(delay)
+            except APIStatusError as e:
+                last_error = e
+                if e.status_code in (429, 500, 503) and attempt < max_retries:
+                    delay = 2 ** (attempt + 1)
+                    self.log(f"API error {e.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})", level="warning")
+                    time.sleep(delay)
+                else:
+                    raise
+
+        raise last_error
 
     def parse_json_response(self, response_text: str) -> Dict[str, Any]:
         """

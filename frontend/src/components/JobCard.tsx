@@ -2,7 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import type { JobResponse, JobStatus } from '@/types'
+import { API_URL } from '@/lib/api'
+import { formatDuration } from '@/lib/utils'
 
 interface JobCardProps {
   job: JobResponse
@@ -73,16 +76,6 @@ function formatDate(dateString: string): string {
 }
 
 /**
- * Format duration in seconds to MM:SS.
- */
-function formatDuration(seconds?: number): string {
-  if (!seconds) return ''
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-/**
  * Get a display title for the job.
  */
 function getJobTitle(job: JobResponse): string {
@@ -94,6 +87,29 @@ function getJobTitle(job: JobResponse): string {
     return `${job.file_ids.length} file(s) enhanced`
   }
   return 'Untitled podcast'
+}
+
+/**
+ * Get thumbnail URL from job's image assets.
+ */
+function getThumbnailUrl(job: JobResponse): string | null {
+  const images = job.result?.image_assets
+  if (!images || images.length === 0) return null
+
+  // Use the first image as thumbnail via the preview endpoint
+  const firstImage = images[0]
+  return `${API_URL}/api/outputs/preview/${job.id}/image/${firstImage.id}`
+}
+
+/**
+ * Genre badge component.
+ */
+function GenreBadge({ genre }: { genre: string }) {
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+      {genre}
+    </span>
+  )
 }
 
 /**
@@ -123,17 +139,48 @@ export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
 
   const canView = job.status === 'completed'
   const duration = job.result?.duration_seconds
+  const thumbnailUrl = getThumbnailUrl(job)
 
   return (
     <div className="card hover:border-border/80 transition-colors">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start gap-4">
+        {/* Thumbnail */}
+        {thumbnailUrl ? (
+          <div className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-secondary">
+            <Image
+              src={thumbnailUrl}
+              alt="Podcast thumbnail"
+              fill
+              className="object-cover"
+              sizes="80px"
+              unoptimized
+            />
+          </div>
+        ) : (
+          <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-secondary flex items-center justify-center">
+            <svg
+              className="w-8 h-8 text-muted-foreground/50"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+              />
+            </svg>
+          </div>
+        )}
+
         {/* Main content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="font-medium truncate">{getJobTitle(job)}</h3>
             <StatusBadge status={job.status} />
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
             <span className="capitalize">{job.mode} mode</span>
             <span>·</span>
             <span>{formatDate(job.created_at)}</span>
@@ -144,10 +191,11 @@ export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
               </>
             )}
           </div>
+          {/* Genre badge from guidance */}
           {job.guidance && (
-            <p className="text-sm text-muted-foreground mt-1 truncate">
-              {job.guidance}
-            </p>
+            <div className="mt-2">
+              <GenreBadge genre={job.guidance} />
+            </div>
           )}
         </div>
 

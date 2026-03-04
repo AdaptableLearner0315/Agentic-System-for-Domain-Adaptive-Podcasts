@@ -1,5 +1,11 @@
 'use client'
 
+/**
+ * Props for the Pagination component.
+ * @property currentPage - Current active page (1-indexed)
+ * @property totalPages - Total number of pages
+ * @property onPageChange - Callback when page changes
+ */
 interface PaginationProps {
   currentPage: number
   totalPages: number

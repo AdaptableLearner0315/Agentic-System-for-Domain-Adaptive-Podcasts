@@ -246,23 +246,29 @@ class BGMParallelExecutor(ParallelExecutor):
         Generate BGM segments in parallel.
 
         Args:
-            segments: List of segments with 'prompt', 'filename', 'duration'
-            bgm_func: BGM generation function (emotion, filename, duration) -> path
+            segments: List of segments with 'prompt', 'filename', 'duration'.
+                      Can also include 'use_stems' and 'emotions' for stem mixing.
+            bgm_func: BGM generation function (emotion, filename, duration, **kwargs) -> path
 
         Returns:
             List of results with paths
         """
-        tasks = [
-            {
-                'id': f"bgm_{seg.get('segment_id', i)}",
-                'args': {
-                    'emotion': seg.get('emotion', 'neutral'),
-                    'output_filename': seg['filename'],
-                    'duration': seg.get('duration', 30)
-                }
+        tasks = []
+        for i, seg in enumerate(segments):
+            args = {
+                'emotion': seg.get('emotion', 'neutral'),
+                'output_filename': seg['filename'],
+                'duration': seg.get('duration', 30)
             }
-            for i, seg in enumerate(segments)
-        ]
+            # Pass extra kwargs for stem mixing if present
+            if seg.get('use_stems'):
+                args['use_stems'] = True
+                args['emotions'] = seg.get('emotions', [])
+
+            tasks.append({
+                'id': f"bgm_{seg.get('segment_id', i)}",
+                'args': args
+            })
 
         results = await self.batch_execute(tasks, bgm_func)
 

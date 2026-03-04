@@ -3,11 +3,15 @@ Job state management service.
 
 Tracks all generation jobs in memory, providing state management,
 job lifecycle handling, and progress tracking.
+
+Active jobs (PENDING/RUNNING) are stored in memory for fast progress updates.
+Terminal jobs (COMPLETED/FAILED/CANCELLED) are persisted to SQLite for history.
 """
 
 import uuid
+import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 import threading
 
@@ -18,6 +22,13 @@ from ..models.responses import (
     ResultResponse,
     AssetInfo,
 )
+from ..logging_config import get_logger
+from ..constants import JOB_ID_LENGTH
+
+logger = get_logger("job_manager")
+
+if TYPE_CHECKING:
+    from ..database.repository import JobRepository
 
 
 @dataclass
@@ -64,18 +75,32 @@ class JobManager:
     Provides thread-safe access to job state, with methods for
     creating, updating, and querying jobs.
 
-    This implementation stores jobs in memory. For production,
-    consider persisting to a database.
+    Hybrid storage strategy:
+    - Active jobs (PENDING/RUNNING) → stored in memory for fast progress updates
+    - Terminal jobs (COMPLETED/FAILED/CANCELLED) → persisted to SQLite
 
     Attributes:
         _jobs: Dictionary mapping job IDs to job state
         _lock: Thread lock for safe concurrent access
+        _db_enabled: Whether database persistence is enabled
+        _pending_persists: Queue of job IDs to persist asynchronously
     """
 
     def __init__(self):
         """Initialize the job manager."""
         self._jobs: Dict[str, JobState] = {}
         self._lock = threading.RLock()
+        self._db_enabled: bool = False
+        self._pending_persists: List[str] = []
+
+    def enable_persistence(self) -> None:
+        """Enable database persistence after database is initialized."""
+        self._db_enabled = True
+
+    def _get_session_factory(self):
+        """Get the async session factory for database operations."""
+        from ..database.connection import get_async_session
+        return get_async_session()
 
     def create_job(
         self,
@@ -98,7 +123,7 @@ class JobManager:
         Returns:
             JobResponse with the new job details.
         """
-        job_id = str(uuid.uuid4())[:8]  # Short ID for convenience
+        job_id = str(uuid.uuid4())[:JOB_ID_LENGTH]
 
         job_state = JobState(
             id=job_id,
@@ -158,6 +183,8 @@ class JobManager:
         """
         Mark a job as completed with result.
 
+        The job will be queued for database persistence.
+
         Args:
             job_id: Unique job identifier.
             result: Pipeline result dictionary.
@@ -171,6 +198,8 @@ class JobManager:
                 job_state.status = JobStatus.COMPLETED
                 job_state.completed_at = datetime.utcnow()
                 job_state.result = result
+                # Queue for persistence
+                self._pending_persists.append(job_id)
                 return self._to_response(job_state)
         return None
 
@@ -181,6 +210,8 @@ class JobManager:
     ) -> Optional[JobResponse]:
         """
         Mark a job as failed with error.
+
+        The job will be queued for database persistence.
 
         Args:
             job_id: Unique job identifier.
@@ -195,12 +226,16 @@ class JobManager:
                 job_state.status = JobStatus.FAILED
                 job_state.completed_at = datetime.utcnow()
                 job_state.error = error
+                # Queue for persistence
+                self._pending_persists.append(job_id)
                 return self._to_response(job_state)
         return None
 
     def cancel_job(self, job_id: str) -> Optional[JobResponse]:
         """
         Mark a job as cancelled.
+
+        The job will be queued for database persistence.
 
         Args:
             job_id: Unique job identifier.
@@ -214,6 +249,8 @@ class JobManager:
                 job_state.status = JobStatus.CANCELLED
                 job_state.completed_at = datetime.utcnow()
                 job_state.cancel_requested = True
+                # Queue for persistence
+                self._pending_persists.append(job_id)
                 return self._to_response(job_state)
         return None
 
@@ -385,8 +422,9 @@ class JobManager:
                     job_id=job_id,
                     success=result.get("success", False),
                     output_path=result.get("output_path"),
+                    audio_output_path=result.get("audio_output_path"),
                     video_url=f"/api/outputs/stream/{job_id}" if result.get("output_path") else None,
-                    audio_url=f"/api/outputs/download/{job_id}?file_type=audio" if result.get("output_path") else None,
+                    audio_url=f"/api/outputs/download/{job_id}?file_type=audio" if result.get("audio_output_path") else None,
                     duration_seconds=result.get("duration_seconds"),
                     script=result.get("script"),
                     tts_assets=[
@@ -499,3 +537,185 @@ class JobManager:
             result=result,
             error=job_state.error,
         )
+
+    # -------------------------------------------------------------------------
+    # Database Persistence Methods
+    # -------------------------------------------------------------------------
+
+    async def persist_pending_jobs(self) -> int:
+        """
+        Persist all pending jobs to the database.
+
+        Should be called periodically or after job completion.
+
+        Returns:
+            Number of jobs persisted.
+        """
+        if not self._db_enabled:
+            return 0
+
+        session_factory = self._get_session_factory()
+        if not session_factory:
+            return 0
+
+        # Get pending job IDs atomically
+        with self._lock:
+            job_ids = self._pending_persists.copy()
+            self._pending_persists.clear()
+
+        if not job_ids:
+            return 0
+
+        persisted = 0
+        async with session_factory() as session:
+            from ..database.repository import JobRepository
+            repository = JobRepository(session)
+
+            for job_id in job_ids:
+                try:
+                    await self._persist_job(job_id, repository)
+                    persisted += 1
+                except Exception as e:
+                    logger.warning("Failed to persist job %s: %s", job_id, e)
+                    # Re-queue for retry
+                    with self._lock:
+                        if job_id not in self._pending_persists:
+                            self._pending_persists.append(job_id)
+
+        return persisted
+
+    async def _persist_job(self, job_id: str, repository: "JobRepository") -> bool:
+        """
+        Persist a single job to the database.
+
+        Args:
+            job_id: The job ID to persist.
+            repository: Repository instance with active session.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if not job_state:
+                return False
+
+        # Import here to avoid circular imports
+        from ..database.models import JobModel
+
+        job_model = JobModel.from_job_state(job_state)
+        await repository.update(job_model)
+        return True
+
+    async def load_jobs_from_db(self, days: int = 30) -> int:
+        """
+        Load recent jobs from database into memory.
+
+        Should be called during application startup.
+
+        Args:
+            days: Number of days of history to load.
+
+        Returns:
+            Number of jobs loaded.
+        """
+        if not self._db_enabled:
+            return 0
+
+        session_factory = self._get_session_factory()
+        if not session_factory:
+            return 0
+
+        try:
+            async with session_factory() as session:
+                from ..database.repository import JobRepository
+                repository = JobRepository(session)
+
+                job_models = await repository.get_recent_completed(days=days)
+                loaded = 0
+
+                with self._lock:
+                    for model in job_models:
+                        # Only load if not already in memory
+                        if model.id not in self._jobs:
+                            self._jobs[model.id] = model.to_job_state()
+                            loaded += 1
+
+                return loaded
+        except Exception as e:
+            logger.error("Failed to load jobs from database: %s", e)
+            return 0
+
+    async def get_job_from_db(self, job_id: str) -> Optional[JobResponse]:
+        """
+        Get a job from database (fallback when not in memory).
+
+        Args:
+            job_id: The job ID to retrieve.
+
+        Returns:
+            JobResponse if found in database, None otherwise.
+        """
+        if not self._db_enabled:
+            return None
+
+        session_factory = self._get_session_factory()
+        if not session_factory:
+            return None
+
+        try:
+            async with session_factory() as session:
+                from ..database.repository import JobRepository
+                repository = JobRepository(session)
+
+                job_model = await repository.get(job_id)
+                if job_model:
+                    job_state = job_model.to_job_state()
+                    # Cache in memory
+                    with self._lock:
+                        self._jobs[job_id] = job_state
+                    return self._to_response(job_state)
+        except Exception as e:
+            logger.error("Failed to load job %s from database: %s", job_id, e)
+
+        return None
+
+    async def persist_all_jobs(self) -> int:
+        """
+        Persist all in-memory jobs to database.
+
+        Should be called during graceful shutdown.
+
+        Returns:
+            Number of jobs persisted.
+        """
+        if not self._db_enabled:
+            return 0
+
+        session_factory = self._get_session_factory()
+        if not session_factory:
+            return 0
+
+        # Get all terminal jobs
+        with self._lock:
+            terminal_jobs = [
+                job_id for job_id, job in self._jobs.items()
+                if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
+            ]
+
+        if not terminal_jobs:
+            return 0
+
+        persisted = 0
+        async with session_factory() as session:
+            from ..database.repository import JobRepository
+            repository = JobRepository(session)
+
+            for job_id in terminal_jobs:
+                try:
+                    await self._persist_job(job_id, repository)
+                    persisted += 1
+                except Exception as e:
+                    logger.error("Failed to persist job %s on shutdown: %s", job_id, e)
+
+        return persisted

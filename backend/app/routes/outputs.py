@@ -14,9 +14,35 @@ from ..models.responses import ErrorResponse
 from ..dependencies import get_job_manager
 from ..services.job_manager import JobManager
 from ..models.enums import JobStatus
-from ..config import get_settings
+from ..config import get_settings, Settings
+from ..constants import STREAM_CHUNK_SIZE
 
 router = APIRouter()
+
+
+def _validate_file_path(file_path: Path, settings: Settings) -> None:
+    """
+    Validate that a file path is within allowed directories.
+
+    Prevents directory traversal attacks by ensuring the resolved path
+    is within the output or upload directories.
+
+    Args:
+        file_path: Resolved path to validate.
+        settings: Application settings with allowed directory paths.
+
+    Raises:
+        HTTPException: If path is outside allowed directories.
+    """
+    allowed_dirs = [
+        Path(settings.output_path).resolve(),
+        Path(settings.upload_path).resolve(),
+    ]
+    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: path outside allowed directory"
+        )
 
 
 @router.get(
@@ -70,21 +96,14 @@ async def download_output(
     if file_type == "video":
         if result.output_path:
             file_path = Path(result.output_path).resolve()
-            # Validate path is within allowed directories
-            allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
-            if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
-                raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
+            _validate_file_path(file_path, settings)
             media_type = "video/mp4"
             filename = f"nell_podcast_{job_id}.mp4"
     elif file_type == "audio":
-        # Look for audio file in result
-        if result.output_path:
-            video_path = Path(result.output_path).resolve()
-            audio_path = (video_path.parent / "audio" / f"{video_path.stem}.mp3").resolve()
-            # Validate path is within allowed directories
-            allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
-            if not any(str(audio_path).startswith(str(d)) for d in allowed_dirs):
-                raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
+        # Use the stored audio path directly
+        if result.audio_output_path:
+            audio_path = Path(result.audio_output_path).resolve()
+            _validate_file_path(audio_path, settings)
             if audio_path.exists():
                 file_path = audio_path
                 media_type = "audio/mpeg"
@@ -159,17 +178,14 @@ async def stream_video(
 
     settings = get_settings()
     file_path = Path(result.output_path).resolve()
-    # Validate path is within allowed directories
-    allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
-    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
-        raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
+    _validate_file_path(file_path, settings)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video file not found")
 
     def iterfile():
         """Generator to stream file in chunks."""
         with open(file_path, "rb") as f:
-            while chunk := f.read(1024 * 1024):  # 1MB chunks
+            while chunk := f.read(STREAM_CHUNK_SIZE):
                 yield chunk
 
     file_size = file_path.stat().st_size
@@ -252,10 +268,7 @@ async def preview_asset(
 
     settings = get_settings()
     file_path = Path(asset.path).resolve()
-    # Validate path is within allowed directories
-    allowed_dirs = [Path(settings.output_path).resolve(), Path(settings.upload_path).resolve()]
-    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
-        raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
+    _validate_file_path(file_path, settings)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Asset file not found")
 

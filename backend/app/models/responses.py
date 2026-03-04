@@ -94,6 +94,7 @@ class ResultResponse(BaseModel):
         job_id: Unique job identifier
         success: Whether generation succeeded
         output_path: Path to final video file
+        audio_output_path: Path to final audio file (MP3)
         video_url: URL to download/stream video
         duration_seconds: Total video duration
         script: Enhanced script data
@@ -104,6 +105,7 @@ class ResultResponse(BaseModel):
     job_id: str
     success: bool
     output_path: Optional[str] = None
+    audio_output_path: Optional[str] = None
     video_url: Optional[str] = None
     audio_url: Optional[str] = None
     duration_seconds: Optional[float] = None

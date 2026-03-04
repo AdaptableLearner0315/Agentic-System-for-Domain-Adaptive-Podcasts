@@ -6,8 +6,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { startGeneration, cancelJob, getJobResult, getJob } from '@/lib/api'
+import { startGeneration, cancelJob, getJobResult, getJob, getJobStatus } from '@/lib/api'
 import { ProgressWebSocket, createProgressConnection } from '@/lib/websocket'
+import { STORAGE_KEYS } from '@/lib/constants'
 import type {
   GenerationRequest,
   JobStatus,
@@ -70,15 +71,99 @@ export function useGeneration(): UseGenerationReturn {
   // WebSocket connection ref
   const wsRef = useRef<ProgressWebSocket | null>(null)
 
-  // Cleanup WebSocket on unmount or jobId change
+  // On mount: recover active job from localStorage
   useEffect(() => {
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.disconnect()
-        wsRef.current = null
-      }
+    const savedJobId = localStorage.getItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+    if (savedJobId) {
+      // Check if job is still running
+      getJob(savedJobId)
+        .then((job) => {
+          if (job.status === 'running' || job.status === 'pending') {
+            setJobId(savedJobId)
+            setStatus(job.status)
+          } else if (job.status === 'completed') {
+            setJobId(savedJobId)
+            setStatus('completed')
+            getJobResult(savedJobId).then(setResult).catch(() => {})
+            localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+          } else {
+            localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+        })
     }
-  }, [jobId])
+  }, [])
+
+  // Track if we should connect (avoid connecting for terminal states from localStorage recovery)
+  const shouldConnectRef = useRef(false)
+
+  // Update shouldConnect when status changes (for localStorage recovery case)
+  useEffect(() => {
+    shouldConnectRef.current = status === 'pending' || status === 'running'
+  }, [status])
+
+  // WebSocket lifecycle: connect when jobId is set, cleanup on change/unmount
+  // NOTE: status is NOT a dependency - we don't want to reconnect when status changes
+  useEffect(() => {
+    // Don't connect if no job
+    if (!jobId) return
+
+    // Don't connect if status is terminal (e.g., recovered completed job from localStorage)
+    // We check the ref which is updated by the previous effect
+    if (!shouldConnectRef.current && (status === 'completed' || status === 'failed' || status === 'cancelled')) {
+      return
+    }
+
+    const ws = createProgressConnection(jobId, {
+      onProgress: (progressData) => {
+        setProgress(progressData)
+        if (progressData.phase === 'complete') {
+          setStatus('completed')
+        } else if (progressData.phase === 'error') {
+          setStatus('failed')
+        } else {
+          setStatus('running')
+        }
+      },
+      onComplete: async (data) => {
+        setStatus('completed')
+        localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+        try {
+          const fullResult = await getJobResult(jobId)
+          setResult(fullResult)
+        } catch {
+          setResult({
+            job_id: jobId,
+            success: data.success,
+            video_url: data.video_url,
+            output_path: data.output_path,
+            duration_seconds: data.duration_seconds,
+          })
+        }
+      },
+      onError: (errorMsg) => {
+        setStatus('failed')
+        setError(errorMsg)
+        localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
+      },
+      onStateChange: (state) => {
+        if (state === 'error') {
+          setError('Connection lost. Attempting to reconnect...')
+        } else if (state === 'connected') {
+          setError(null)
+        }
+      },
+    })
+    wsRef.current = ws
+
+    return () => {
+      ws.disconnect()
+      wsRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]) // Only reconnect when jobId changes, NOT when status changes
 
   /**
    * Start a new generation job.
@@ -92,51 +177,14 @@ export function useGeneration(): UseGenerationReturn {
     try {
       // Create job via API
       const job = await startGeneration(request)
-      setJobId(job.id)
-      setStatus(job.status)
 
-      // Connect to WebSocket for progress updates
-      wsRef.current = createProgressConnection(job.id, {
-        onProgress: (progressData) => {
-          setProgress(progressData)
-          // Update status based on phase
-          if (progressData.phase === 'complete') {
-            setStatus('completed')
-          } else if (progressData.phase === 'error') {
-            setStatus('failed')
-          } else {
-            setStatus('running')
-          }
-        },
-        onComplete: async (data) => {
-          setStatus('completed')
-          // Fetch full result
-          try {
-            const fullResult = await getJobResult(job.id)
-            setResult(fullResult)
-          } catch (e) {
-            // Use partial result from WebSocket
-            setResult({
-              job_id: job.id,
-              success: data.success,
-              video_url: data.video_url,
-              output_path: data.output_path,
-              duration_seconds: data.duration_seconds,
-            })
-          }
-        },
-        onError: (errorMsg) => {
-          setStatus('failed')
-          setError(errorMsg)
-        },
-        onStateChange: (state) => {
-          if (state === 'error') {
-            setError('Connection lost. Attempting to reconnect...')
-          } else if (state === 'connected') {
-            setError(null)
-          }
-        },
-      })
+      // Persist job ID for recovery across page refresh
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_JOB_ID, job.id)
+
+      // Set status first so the useEffect sees 'pending'/'running' (not a terminal state)
+      setStatus(job.status)
+      // Setting jobId triggers the useEffect that connects the WebSocket
+      setJobId(job.id)
     } catch (e) {
       setStatus('failed')
       setError(e instanceof Error ? e.message : 'Failed to start generation')
@@ -173,6 +221,9 @@ export function useGeneration(): UseGenerationReturn {
       wsRef.current.disconnect()
       wsRef.current = null
     }
+
+    // Clear persisted job
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB_ID)
 
     // Reset all state
     setStatus(null)

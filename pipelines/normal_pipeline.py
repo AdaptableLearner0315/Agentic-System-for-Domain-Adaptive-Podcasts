@@ -17,6 +17,7 @@ Optimizes for speed through:
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
@@ -78,14 +79,16 @@ class NormalPipeline:
     8. Unified GENERATING_ASSETS progress phase (avoids phase-fighting)
     """
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Optional[Path] = None, job_id: Optional[str] = None):
         """
         Initialize the Normal Pipeline.
 
         Args:
             output_dir: Output directory for generated files
+            job_id: Unique job identifier for isolating outputs (auto-generated if not provided)
         """
         self.output_dir = Path(output_dir) if output_dir else OUTPUT_DIR
+        self.job_id = job_id or str(uuid.uuid4())[:8]
         self.config = get_mode_config("normal")
         self.input_router = InputRouter()
 
@@ -397,6 +400,9 @@ class NormalPipeline:
         # Track the last completed item per component for preview text
         last_preview = {'tts': '', 'bgm': '', 'images': ''}
 
+        # Track start times for elapsed calculation
+        component_start_times = {'tts': None, 'bgm': None, 'images': None}
+
         def update_asset_progress(component: str, current: int, total: int) -> None:
             """Callback shared by all three executors to emit a single unified progress update.
 
@@ -410,6 +416,12 @@ class NormalPipeline:
                 total: Total items for this component (unused — we use the outer totals).
             """
             nonlocal tts_done, bgm_done, img_done
+            now = time.time()
+
+            # Initialize start time on first progress update for this component
+            if component_start_times[component] is None:
+                component_start_times[component] = now
+
             if component == 'tts':
                 tts_done = current
             elif component == 'bgm':
@@ -433,6 +445,11 @@ class NormalPipeline:
                     preview = task.get('prompt', '')[:80]
                     last_preview['images'] = preview
 
+            # Calculate elapsed time per component
+            def elapsed_for(comp: str) -> float:
+                start = component_start_times.get(comp)
+                return round(now - start, 1) if start else 0.0
+
             if progress:
                 progress.generating_assets(
                     step=grand_done,
@@ -440,9 +457,9 @@ class NormalPipeline:
                     message=f"Generating assets ({grand_done}/{grand_total})",
                     details={
                         'parallel_status': {
-                            'tts': {'done': tts_done, 'total': tts_total},
-                            'bgm': {'done': bgm_done, 'total': bgm_total},
-                            'images': {'done': img_done, 'total': img_total},
+                            'tts': {'done': tts_done, 'total': tts_total, 'elapsed_s': elapsed_for('tts')},
+                            'bgm': {'done': bgm_done, 'total': bgm_total, 'elapsed_s': elapsed_for('bgm')},
+                            'images': {'done': img_done, 'total': img_total, 'elapsed_s': elapsed_for('images')},
                         },
                         'preview': preview or last_preview.get('tts') or last_preview.get('images'),
                     }
@@ -503,7 +520,7 @@ class NormalPipeline:
             progress.assembling_video("Creating video...")
         video_start = time.time()
         try:
-            final_video = await self._assemble_video(final_audio, image_results)
+            final_video = await self._assemble_video(final_audio, image_results, self.job_id)
         except Exception as video_err:
             print(f"[NormalPipeline] Video assembly failed, returning audio: {video_err}")
             final_video = final_audio
@@ -540,9 +557,8 @@ class NormalPipeline:
 
         return tasks
 
-    def _prepare_bgm_tasks(self, script: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Prepare BGM tasks (3 segments for speed)."""
-        # Extract emotions from script
+    def _extract_emotions_from_script(self, script: Dict[str, Any]) -> List[str]:
+        """Extract emotion timeline from script for BGM selection."""
         emotions = []
         if script.get("hook", {}).get("emotion"):
             emotions.append(script["hook"]["emotion"])
@@ -552,7 +568,28 @@ class NormalPipeline:
                 if chunk.get("emotion"):
                     emotions.append(chunk["emotion"])
 
-        # Create 3-segment tasks
+        return emotions if emotions else ["neutral"]
+
+    def _prepare_bgm_tasks(self, script: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Prepare BGM tasks - use stems if available, otherwise API generation."""
+        emotions = self._extract_emotions_from_script(script)
+
+        # Check if we should use pre-generated stems (MUCH faster: 2-5s vs 20-30s)
+        if self.config["bgm"]["use_stems"] and self.music_manager.has_stems():
+            stem_count = self.music_manager.get_available_stem_count()
+            print(f"[NormalPipeline] Using pre-generated stems ({stem_count} available)")
+
+            # Return a single task that will mix stems locally
+            return [{
+                "id": "bgm_stems",
+                "segment_id": 0,  # Special marker for stem mixing
+                "filename": "bgm_from_stems",
+                "emotions": emotions,
+                "use_stems": True,
+            }]
+
+        # Fall back to API generation (3 segments)
+        print("[NormalPipeline] No stems available, using API generation")
         tasks = []
         for seg_id, seg_config in NORMAL_BGM_SEGMENTS.items():
             emotion_idx = (seg_id - 1) * (len(emotions) // 3) if emotions else 0
@@ -570,8 +607,9 @@ class NormalPipeline:
         return tasks
 
     def _prepare_image_tasks(self, script: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Prepare image tasks (4 key images for speed)."""
+        """Prepare image tasks based on config count."""
         tasks = []
+        image_count = self.config["images"]["count"]
 
         # Collect visual cues
         visual_cues = []
@@ -589,8 +627,8 @@ class NormalPipeline:
                     visual_cues.append(cues[0])
                     break
 
-        # Take first 4 cues
-        for i, cue in enumerate(visual_cues[:4]):
+        # Take configured number of cues
+        for i, cue in enumerate(visual_cues[:image_count]):
             tasks.append({
                 "id": f"image_{i}",
                 "prompt": cue + ", cinematic photography, documentary style, photorealistic, film grain",
@@ -600,27 +638,82 @@ class NormalPipeline:
         return tasks
 
     def _generate_tts_chunk(self, text: str, filename: str) -> Optional[str]:
-        """Generate TTS for a single chunk using shared narrator."""
-        return self.narrator.generate_speech(text, filename)
+        """Generate TTS for a single chunk - with caching if enabled."""
+        # Check cache first if asset library is enabled
+        if self.config["tts"]["use_asset_library"]:
+            cached = self.voice_manager.get_phrase_path(text)
+            if cached:
+                print(f"    [TTS Cache HIT] {text[:40]}...")
+                return cached
+
+        # Generate new audio
+        path = self.narrator.generate_speech(text, filename)
+
+        # Cache for future use if enabled
+        if path and self.config["tts"]["use_asset_library"]:
+            self.voice_manager.add_to_cache(text, path)
+
+        return path
 
     def _generate_bgm_segment(
         self,
         emotion: str,
         output_filename: str,
-        duration: int
+        duration: int,
+        **kwargs
     ) -> Optional[str]:
-        """Generate BGM segment."""
-        from agents.audio_designer.bgm_generator import BGMGenerator
+        """Generate BGM segment - via stems if flagged, otherwise API."""
+        # Check if this is a stem-mixing task
+        if kwargs.get("use_stems"):
+            return self._mix_bgm_from_stems(
+                kwargs.get("emotions", [emotion]),
+                output_filename
+            )
 
+        # Standard API generation
+        from agents.audio_designer.bgm_generator import BGMGenerator
         generator = BGMGenerator(output_dir=AUDIO_DIR / "bgm")
         return generator.generate_bgm(emotion, output_filename, duration)
+
+    def _mix_bgm_from_stems(
+        self,
+        emotions: List[str],
+        output_filename: str
+    ) -> Optional[str]:
+        """Mix pre-generated stems into a single BGM track (2-5s vs 20-30s API)."""
+        import time
+        start = time.time()
+
+        # Select best stems for the emotion timeline
+        stems = self.music_manager.select_stems_for_emotions(emotions)
+
+        # Check we have at least some stems
+        valid_stems = {k: v for k, v in stems.items() if v}
+        if not valid_stems:
+            print("[NormalPipeline] No valid stems found, falling back to empty")
+            return None
+
+        print(f"[NormalPipeline] Selected stems: {list(valid_stems.keys())}")
+
+        # Mix stems locally
+        output_dir = AUDIO_DIR / "bgm"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = str(output_dir / f"{output_filename}.wav")
+
+        result = self.music_manager.mix_stems(stems, output_path)
+
+        elapsed = time.time() - start
+        print(f"[NormalPipeline] Stem mixing completed in {elapsed:.1f}s")
+
+        return result
 
     def _generate_image(self, prompt: str, filename: str) -> Optional[str]:
         """Generate a single image."""
         import fal_client
         import requests
 
-        output_dir = VISUALS_DIR / "normal_mode"
+        # Include job_id in path to avoid overwriting images from other jobs
+        output_dir = VISUALS_DIR / "normal_mode" / self.job_id
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{filename}.png"
 
@@ -709,7 +802,8 @@ class NormalPipeline:
     async def _assemble_video(
         self,
         audio_path: str,
-        image_results: List[Dict[str, Any]]
+        image_results: List[Dict[str, Any]],
+        job_id: Optional[str] = None
     ) -> str:
         """Assemble final video from audio and images."""
         from utils.video_assembler import create_podcast_video
@@ -721,8 +815,11 @@ class NormalPipeline:
             # Return audio-only path
             return audio_path
 
-        output_dir = VISUALS_DIR / "normal_mode"
-        output_path = output_dir / "final_podcast_normal.mp4"
+        # Include job_id in path to avoid overwriting videos from other jobs
+        job_suffix = job_id or self.job_id
+        output_dir = VISUALS_DIR / "normal_mode" / job_suffix
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"final_podcast_{job_suffix}.mp4"
 
         # Run assembly in thread pool (single-pass, no Ken Burns for speed)
         loop = asyncio.get_event_loop()
@@ -745,7 +842,8 @@ class NormalPipeline:
 def run_normal_pipeline(
     input_path: str,
     user_prompt: Optional[str] = None,
-    show_progress: bool = True
+    show_progress: bool = True,
+    job_id: Optional[str] = None
 ) -> NormalPipelineResult:
     """
     Convenience function to run the Normal pipeline.
@@ -754,13 +852,14 @@ def run_normal_pipeline(
         input_path: Input file path
         user_prompt: Optional user context
         show_progress: Show progress in console
+        job_id: Optional job ID for isolating outputs (auto-generated if not provided)
 
     Returns:
         NormalPipelineResult
     """
     from utils.progress_stream import print_progress
 
-    pipeline = NormalPipeline()
+    pipeline = NormalPipeline(job_id=job_id)
     progress = None
 
     if show_progress:

@@ -26,7 +26,7 @@ MODE_CONFIGS: Dict[str, Dict[str, Any]] = {
         # TTS settings
         "tts": {
             "granularity": "chunk",  # Generate per-chunk, not per-sentence
-            "parallel_workers": 10,  # Max concurrent API calls
+            "parallel_workers": 15,  # Max concurrent API calls (increased for speed)
             "apply_voice_styles": False,  # Skip voice styling for speed
             "use_asset_library": True,  # Use pre-generated assets when possible
         },
@@ -41,10 +41,10 @@ MODE_CONFIGS: Dict[str, Dict[str, Any]] = {
 
         # Image settings
         "images": {
-            "count": 4,  # Just 4 key images
+            "count": 2,  # Just 2 key images (reduced for speed)
             "use_library": True,  # Smart-select from library
             "parallel_workers": 4,
-            "generate_custom": 1,  # Generate only 1 custom image
+            "generate_custom": 2,  # Generate 2 custom images
         },
 
         # Assembly settings

@@ -108,6 +108,34 @@ class MusicAssetManager:
             return path
         return None
 
+    def has_stems(self, min_coverage: float = 0.5) -> bool:
+        """
+        Check if sufficient pre-generated stems are available.
+
+        Args:
+            min_coverage: Minimum fraction of stem categories that must have
+                at least one stem (default 0.5 = at least 2 of 3 categories)
+
+        Returns:
+            True if enough stems are available for fast generation
+        """
+        categories_with_stems = 0
+        for category in self.STEM_CATEGORIES:
+            for mood in self.STEM_CATEGORIES[category]["moods"]:
+                if self.get_stem_path(category, mood):
+                    categories_with_stems += 1
+                    break  # Only need one stem per category
+
+        return categories_with_stems >= len(self.STEM_CATEGORIES) * min_coverage
+
+    def get_available_stem_count(self) -> int:
+        """Return the number of stems currently in the catalog."""
+        count = 0
+        for key, path in self._stem_catalog.items():
+            if Path(path).exists():
+                count += 1
+        return count
+
     def add_to_catalog(self, category: str, mood: str, audio_path: str):
         """
         Add a generated stem to the catalog.

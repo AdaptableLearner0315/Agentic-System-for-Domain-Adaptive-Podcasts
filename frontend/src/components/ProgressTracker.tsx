@@ -127,6 +127,10 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
     return `${mins}m ${secs}s`
   }
 
+  // Determine mode from details or phase for initial ETA
+  const isProMode = progress.details && 'config_used' in (progress.details as Record<string, unknown>)
+  const modeEstimate = isProMode ? '~4-6 minutes' : '~1-2 minutes'
+
   const currentIndex = getCurrentPhaseIndex()
   const isComplete = progress.phase === 'complete'
   const isError = progress.phase === 'error'
@@ -143,10 +147,16 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
           <p className="text-2xl font-bold tabular-nums">
             {Math.round(progress.progress_percent)}%
           </p>
-          {progress.eta_seconds && progress.eta_seconds > 0 && (
+          {progress.eta_seconds && progress.eta_seconds > 0 ? (
             <p className="text-xs text-muted-foreground">
               ~{formatTime(progress.eta_seconds)} remaining
             </p>
+          ) : (
+            !isComplete && !isError && progress.progress_percent < 5 && (
+              <p className="text-xs text-muted-foreground">
+                Typically takes {modeEstimate}
+              </p>
+            )
           )}
         </div>
       </div>
@@ -221,16 +231,39 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
 
       {/* Parallel Asset Sub-Progress */}
       {progress.phase === 'generating_assets' && parallelStatus && (
-        <div className="flex justify-center gap-6 text-xs tabular-nums">
-          <span className={parallelStatus.tts.done >= parallelStatus.tts.total ? 'text-success' : 'text-muted-foreground'}>
-            🎙️ Voice {parallelStatus.tts.done}/{parallelStatus.tts.total}
-          </span>
-          <span className={parallelStatus.bgm.done >= parallelStatus.bgm.total ? 'text-success' : 'text-muted-foreground'}>
-            🎵 Music {parallelStatus.bgm.done}/{parallelStatus.bgm.total}
-          </span>
-          <span className={parallelStatus.images.done >= parallelStatus.images.total ? 'text-success' : 'text-muted-foreground'}>
-            🖼️ Images {parallelStatus.images.done}/{parallelStatus.images.total}
-          </span>
+        <div className="space-y-2">
+          <div
+            className="flex justify-center gap-6 text-xs tabular-nums cursor-help"
+            title={`Voice: ${parallelStatus.tts.elapsed_s ?? 0}s (${parallelStatus.tts.done}/${parallelStatus.tts.total}) | Music: ${parallelStatus.bgm.elapsed_s ?? 0}s (${parallelStatus.bgm.done}/${parallelStatus.bgm.total}) | Images: ${parallelStatus.images.elapsed_s ?? 0}s (${parallelStatus.images.done}/${parallelStatus.images.total})`}
+          >
+            <span className={parallelStatus.tts.done >= parallelStatus.tts.total ? 'text-success' : 'text-muted-foreground'}>
+              🎙️ Voice {parallelStatus.tts.done}/{parallelStatus.tts.total}
+              {parallelStatus.tts.elapsed_s !== undefined && parallelStatus.tts.elapsed_s > 0 && (
+                <span className="text-muted-foreground ml-1">({parallelStatus.tts.elapsed_s}s)</span>
+              )}
+            </span>
+            <span className={parallelStatus.bgm.done >= parallelStatus.bgm.total ? 'text-success' : 'text-muted-foreground'}>
+              🎵 Music {parallelStatus.bgm.done}/{parallelStatus.bgm.total}
+              {parallelStatus.bgm.elapsed_s !== undefined && parallelStatus.bgm.elapsed_s > 0 && (
+                <span className="text-muted-foreground ml-1">({parallelStatus.bgm.elapsed_s}s)</span>
+              )}
+            </span>
+            <span className={parallelStatus.images.done >= parallelStatus.images.total ? 'text-success' : 'text-muted-foreground'}>
+              🖼️ Images {parallelStatus.images.done}/{parallelStatus.images.total}
+              {parallelStatus.images.elapsed_s !== undefined && parallelStatus.images.elapsed_s > 0 && (
+                <span className="text-muted-foreground ml-1">({parallelStatus.images.elapsed_s}s)</span>
+              )}
+            </span>
+          </div>
+          {/* Asset generation preview text */}
+          {(() => {
+            const previewText = (progress.details as Record<string, unknown> | undefined)?.preview
+            return previewText ? (
+              <p className="text-xs text-muted-foreground text-center italic truncate px-4">
+                {String(previewText)}
+              </p>
+            ) : null
+          })()}
         </div>
       )}
 

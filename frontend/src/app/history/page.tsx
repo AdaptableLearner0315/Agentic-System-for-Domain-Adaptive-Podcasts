@@ -7,6 +7,7 @@ import { JobCard } from '@/components/JobCard'
 import { FilterBar } from '@/components/FilterBar'
 import { Pagination } from '@/components/Pagination'
 import { listJobs, deleteJob } from '@/lib/api'
+import { STORAGE_KEYS } from '@/lib/constants'
 import type { JobResponse, JobStatus } from '@/types'
 
 const PAGE_SIZE = 10
@@ -60,10 +61,13 @@ function LoadingSkeleton() {
     <div className="space-y-4">
       {[1, 2, 3].map((i) => (
         <div key={i} className="card animate-pulse">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            {/* Thumbnail skeleton */}
+            <div className="w-20 h-20 bg-muted rounded-lg flex-shrink-0" />
             <div className="flex-1">
               <div className="h-5 bg-muted rounded w-2/3 mb-2" />
-              <div className="h-4 bg-muted rounded w-1/3" />
+              <div className="h-4 bg-muted rounded w-1/3 mb-2" />
+              <div className="h-5 bg-muted rounded w-1/4" />
             </div>
             <div className="flex gap-2">
               <div className="h-8 w-16 bg-muted rounded" />
@@ -138,7 +142,7 @@ export default function HistoryPage() {
   const handleReuse = (job: JobResponse) => {
     // Store the job data in sessionStorage for the home page to read
     sessionStorage.setItem(
-      'nell_reuse_job',
+      STORAGE_KEYS.REUSE_JOB,
       JSON.stringify({
         prompt: job.prompt,
         guidance: job.guidance,

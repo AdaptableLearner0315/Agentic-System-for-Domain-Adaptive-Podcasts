@@ -9,7 +9,6 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Any
-import traceback
 
 # Add project root to path for importing existing modules
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -24,6 +23,9 @@ from ..models.requests import GenerationRequest
 from ..config import get_settings
 from .job_manager import JobManager
 from .progress_adapter import adapter_manager, ProgressUpdate as AdapterProgressUpdate
+from ..logging_config import get_logger
+
+logger = get_logger("pipeline")
 
 
 class PipelineService:
@@ -102,7 +104,7 @@ class PipelineService:
         except asyncio.CancelledError:
             self.job_manager.cancel_job(job_id)
         except Exception as e:
-            traceback.print_exc()
+            logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             self.job_manager.fail_job(job_id, str(e))
             await self._update_progress(
                 job_id=job_id,
@@ -114,6 +116,12 @@ class PipelineService:
             # Cleanup
             if job_id in self._running_tasks:
                 del self._running_tasks[job_id]
+
+            # Persist completed/failed/cancelled jobs to database
+            try:
+                await self.job_manager.persist_pending_jobs()
+            except Exception as persist_error:
+                logger.warning("Failed to persist job %s: %s", job_id, persist_error)
 
     async def _execute_pipeline(
         self,
@@ -330,6 +338,86 @@ class PipelineService:
             self.job_manager.fail_job(job_id, f"Content preparation failed: {e}")
             return None
 
+    def _create_progress_callback(self, job_id: str, adapter):
+        """
+        Create a progress callback for pipeline execution.
+
+        The callback updates both the job manager (for persistence) and
+        the WebSocket adapter (for real-time streaming).
+
+        Args:
+            job_id: Job identifier.
+            adapter: WebSocket adapter for real-time updates.
+
+        Returns:
+            Callback function for progress updates.
+        """
+        def progress_callback(update):
+            self.job_manager.update_progress(
+                job_id=job_id,
+                phase=GenerationPhase(update.phase.value),
+                message=update.message,
+                progress_percent=update.progress_percent,
+                current_step=update.current_step,
+                total_steps=update.total_steps,
+                eta_seconds=update.eta_seconds,
+                preview=update.preview,
+                details=update.details,
+            )
+            # Push to WebSocket adapter (on_progress is sync-safe)
+            try:
+                adapter.on_progress(update)
+            except Exception:
+                pass  # Don't fail pipeline if adapter push fails
+
+        return progress_callback
+
+    def _convert_result_to_dict(
+        self,
+        result,
+        include_review_history: bool = False,
+        config=None,
+    ) -> Dict:
+        """
+        Convert a pipeline result to a dictionary.
+
+        Args:
+            result: Pipeline result object.
+            include_review_history: Include review history (Pro mode).
+            config: Pro config to include (if provided).
+
+        Returns:
+            Result as a dictionary.
+        """
+        result_dict = {
+            "success": result.success,
+            "output_path": result.output_path,
+            "audio_output_path": result.audio_output_path,
+            "script": result.script,
+            "tts_files": [
+                {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
+                for i, f in enumerate(result.tts_files)
+            ] if result.tts_files else [],
+            "bgm_files": [
+                {"id": f"bgm_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "bgm"}
+                for i, f in enumerate(result.bgm_files)
+            ] if result.bgm_files else [],
+            "image_files": [
+                {"id": f"img_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "image"}
+                for i, f in enumerate(result.image_files)
+            ] if result.image_files else [],
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+        }
+
+        if include_review_history:
+            result_dict["review_history"] = result.review_history
+
+        if config:
+            result_dict["config_used"] = config.to_dict()
+
+        return result_dict
+
     async def _run_normal_pipeline(
         self,
         job_id: str,
@@ -348,57 +436,17 @@ class PipelineService:
         try:
             # Get adapter while still in async context (thread-safe for sync callbacks)
             adapter = await adapter_manager.get_adapter(job_id)
-
-            # Create progress callback that feeds both job_manager and adapter
-            def progress_callback(update):
-                self.job_manager.update_progress(
-                    job_id=job_id,
-                    phase=GenerationPhase(update.phase.value),
-                    message=update.message,
-                    progress_percent=update.progress_percent,
-                    current_step=update.current_step,
-                    total_steps=update.total_steps,
-                    eta_seconds=update.eta_seconds,
-                    preview=update.preview,
-                    details=update.details,
-                )
-                # Push to WebSocket adapter (on_progress is sync-safe)
-                try:
-                    adapter.on_progress(update)
-                except Exception:
-                    pass  # Don't fail pipeline if adapter push fails
-
-            # Create progress stream
+            progress_callback = self._create_progress_callback(job_id, adapter)
             progress = ProgressStream(callback=progress_callback)
 
-            # Run pipeline (use None for output_dir so pipeline uses its default)
-            pipeline = NormalPipeline()
+            # Run pipeline (pass job_id to isolate outputs per job)
+            pipeline = NormalPipeline(job_id=job_id)
             result = await pipeline.run_with_content(content, progress=progress)
 
-            # Convert result to dict
-            return {
-                "success": result.success,
-                "output_path": result.output_path,
-                "audio_output_path": result.audio_output_path,
-                "script": result.script,
-                "tts_files": [
-                    {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
-                    for i, f in enumerate(result.tts_files)
-                ] if result.tts_files else [],
-                "bgm_files": [
-                    {"id": f"bgm_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "bgm"}
-                    for i, f in enumerate(result.bgm_files)
-                ] if result.bgm_files else [],
-                "image_files": [
-                    {"id": f"img_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "image"}
-                    for i, f in enumerate(result.image_files)
-                ] if result.image_files else [],
-                "duration_seconds": result.duration_seconds,
-                "error": result.error,
-            }
+            return self._convert_result_to_dict(result)
 
         except Exception as e:
-            traceback.print_exc()
+            logger.error("Normal pipeline failed: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     async def _run_pro_pipeline(
@@ -426,59 +474,21 @@ class PipelineService:
 
             # Get adapter while still in async context (thread-safe for sync callbacks)
             adapter = await adapter_manager.get_adapter(job_id)
-
-            # Create progress callback that feeds both job_manager and adapter
-            def progress_callback(update):
-                self.job_manager.update_progress(
-                    job_id=job_id,
-                    phase=GenerationPhase(update.phase.value),
-                    message=update.message,
-                    progress_percent=update.progress_percent,
-                    current_step=update.current_step,
-                    total_steps=update.total_steps,
-                    eta_seconds=update.eta_seconds,
-                    preview=update.preview,
-                    details=update.details,
-                )
-                # Push to WebSocket adapter (on_progress is sync-safe)
-                try:
-                    adapter.on_progress(update)
-                except Exception:
-                    pass  # Don't fail pipeline if adapter push fails
-
-            # Create progress stream
+            progress_callback = self._create_progress_callback(job_id, adapter)
             progress = ProgressStream(callback=progress_callback)
 
-            # Run pipeline (use None for output_dir so pipeline uses its default)
+            # Run pipeline
             pipeline = ProPipeline(config=config)
             result = await pipeline.run_with_content(content, progress=progress)
 
-            # Convert result to dict
-            return {
-                "success": result.success,
-                "output_path": result.output_path,
-                "audio_output_path": result.audio_output_path,
-                "script": result.script,
-                "tts_files": [
-                    {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
-                    for i, f in enumerate(result.tts_files)
-                ] if result.tts_files else [],
-                "bgm_files": [
-                    {"id": f"bgm_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "bgm"}
-                    for i, f in enumerate(result.bgm_files)
-                ] if result.bgm_files else [],
-                "image_files": [
-                    {"id": f"img_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "image"}
-                    for i, f in enumerate(result.image_files)
-                ] if result.image_files else [],
-                "duration_seconds": result.duration_seconds,
-                "review_history": result.review_history,
-                "config_used": config.to_dict() if config else None,
-                "error": result.error,
-            }
+            return self._convert_result_to_dict(
+                result,
+                include_review_history=True,
+                config=config,
+            )
 
         except Exception as e:
-            traceback.print_exc()
+            logger.error("Pro pipeline failed: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     async def cancel_job(self, job_id: str) -> None:

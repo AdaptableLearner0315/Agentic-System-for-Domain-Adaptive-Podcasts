@@ -9,9 +9,16 @@ const nextConfig = {
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
   },
 
-  // Configure image domains if needed
+  // Configure image domains for thumbnails from API
   images: {
-    domains: ['localhost'],
+    remotePatterns: [
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '8000',
+        pathname: '/api/outputs/preview/**',
+      },
+    ],
   },
 
   // Disable x-powered-by header

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # API settings
     api_prefix: str = "/api"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
 
     # File settings
     upload_dir: str = "uploads"
@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     normal_mode_timeout_seconds: int = 300   # 5 minutes
     pro_mode_timeout_seconds: int = 480      # 8 minutes
     subprocess_timeout_seconds: int = 120    # 2 min per FFmpeg call
+
+    # Database settings
+    database_url: str = "sqlite+aiosqlite:///./data/nell.db"
+    db_echo: bool = False  # Log SQL statements (debug)
+    job_cache_days: int = 30  # Days to keep completed jobs
 
     def get_job_timeout(self, mode: str) -> int:
         """Get timeout in seconds for the given pipeline mode."""
@@ -85,6 +90,15 @@ class Settings(BaseSettings):
         """Get maximum upload size in bytes."""
         return self.max_upload_size_mb * 1024 * 1024
 
+    @property
+    def database_path(self) -> Path:
+        """Get database file path from URL."""
+        # Extract path from sqlite URL (e.g., sqlite+aiosqlite:///./data/nell.db -> ./data/nell.db)
+        if self.database_url.startswith("sqlite"):
+            path = self.database_url.split("///")[-1]
+            return Path(path)
+        return Path("./data/nell.db")
+
     def validate_api_keys(self) -> dict[str, bool]:
         """
         Check which API keys are configured.
@@ -100,10 +114,9 @@ class Settings(BaseSettings):
 
     class Config:
         """Pydantic settings configuration."""
-        env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-        # Look for .env in parent directory (project root)
+        # Look for .env in project root (parent of backend/)
         env_file = str(Path(__file__).parent.parent.parent / ".env")
 
 

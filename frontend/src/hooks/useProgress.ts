@@ -10,6 +10,7 @@ import {
   ProgressWebSocket,
   ConnectionState,
 } from '@/lib/websocket'
+import { getJobStatus } from '@/lib/api'
 import type { ProgressResponse } from '@/types'
 
 /**
@@ -65,6 +66,43 @@ export function useProgress(jobId: string | null): UseProgressReturn {
   const [error, setError] = useState<string | null>(null)
 
   const wsRef = useRef<ProgressWebSocket | null>(null)
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Polling fallback when WebSocket fails
+  const startPolling = useCallback((id: string) => {
+    if (pollingRef.current) return // Already polling
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const data = await getJobStatus(id)
+        setProgress(data)
+
+        if (data.phase === 'complete') {
+          setIsComplete(true)
+          setCompletionData({ success: true })
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current)
+            pollingRef.current = null
+          }
+        } else if (data.phase === 'error') {
+          setError(data.message || 'Job failed')
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current)
+            pollingRef.current = null
+          }
+        }
+      } catch {
+        // Polling request failed, keep trying
+      }
+    }, 2000)
+  }, [])
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }, [])
 
   // Connect/disconnect based on jobId
   useEffect(() => {
@@ -73,6 +111,7 @@ export function useProgress(jobId: string | null): UseProgressReturn {
       wsRef.current.disconnect()
       wsRef.current = null
     }
+    stopPolling()
 
     // Reset state
     setProgress(null)
@@ -94,6 +133,7 @@ export function useProgress(jobId: string | null): UseProgressReturn {
     })
 
     ws.setCompleteCallback((data) => {
+      stopPolling()
       setIsComplete(true)
       setCompletionData({
         success: data.success,
@@ -109,6 +149,12 @@ export function useProgress(jobId: string | null): UseProgressReturn {
 
     ws.setStateCallback((state) => {
       setConnectionState(state)
+      // Fall back to polling if WebSocket fails after max reconnects
+      if (state === 'disconnected' && !isComplete && jobId) {
+        startPolling(jobId)
+      } else if (state === 'connected') {
+        stopPolling()
+      }
     })
 
     ws.connect()
@@ -120,8 +166,9 @@ export function useProgress(jobId: string | null): UseProgressReturn {
         wsRef.current.disconnect()
         wsRef.current = null
       }
+      stopPolling()
     }
-  }, [jobId])
+  }, [jobId, isComplete, startPolling, stopPolling])
 
   /**
    * Manually disconnect from WebSocket.

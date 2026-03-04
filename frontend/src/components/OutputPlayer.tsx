@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { ResultResponse } from '@/types'
+import { API_URL } from '@/lib/api'
+import { formatDuration } from '@/lib/utils'
 
 interface OutputPlayerProps {
   /** Generation result data */
@@ -21,32 +23,24 @@ interface OutputPlayerProps {
  */
 export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
   const [activeTab, setActiveTab] = useState<'video' | 'details'>('video')
-
-  /**
-   * Format duration for display.
-   */
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+  const [isMuted, setIsMuted] = useState(true)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   /**
    * Handle video download.
    */
   const handleDownload = async (type: 'video' | 'audio' | 'script') => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     let url = ''
 
     switch (type) {
       case 'video':
-        url = `${apiUrl}/api/outputs/download/${result.job_id}?file_type=video`
+        url = `${API_URL}/api/outputs/download/${result.job_id}?file_type=video`
         break
       case 'audio':
-        url = `${apiUrl}/api/outputs/download/${result.job_id}?file_type=audio`
+        url = `${API_URL}/api/outputs/download/${result.job_id}?file_type=audio`
         break
       case 'script':
-        url = `${apiUrl}/api/outputs/download/${result.job_id}?file_type=script`
+        url = `${API_URL}/api/outputs/download/${result.job_id}?file_type=script`
         break
     }
 
@@ -54,7 +48,7 @@ export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
   }
 
   const videoUrl = result.video_url
-    ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${result.video_url}`
+    ? `${API_URL}${result.video_url}`
     : null
 
   return (
@@ -108,13 +102,28 @@ export function OutputPlayer({ result, onReset }: OutputPlayerProps) {
           {videoUrl ? (
             <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
               <video
+                ref={videoRef}
                 className="w-full h-full"
                 controls
-                autoPlay={false}
+                autoPlay
+                muted={isMuted}
                 src={videoUrl}
               >
                 Your browser does not support video playback.
               </video>
+              {isMuted && (
+                <button
+                  className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-black/90 transition-colors"
+                  onClick={() => {
+                    setIsMuted(false)
+                    if (videoRef.current) {
+                      videoRef.current.muted = false
+                    }
+                  }}
+                >
+                  Unmute
+                </button>
+              )}
             </div>
           ) : (
             <div className="aspect-video rounded-lg bg-secondary flex items-center justify-center">

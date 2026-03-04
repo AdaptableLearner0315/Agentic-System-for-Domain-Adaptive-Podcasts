@@ -19,7 +19,7 @@ import type {
 } from '@/types'
 
 // API base URL from environment
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 /**
  * Custom error class for API errors.

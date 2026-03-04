@@ -8,7 +8,11 @@ proper initialization and cleanup of shared resources.
 from typing import AsyncGenerator
 from functools import lru_cache
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .config import get_settings, Settings
+from .database.connection import get_async_session
+from .database.repository import JobRepository
 from .services.job_manager import JobManager
 from .services.file_service import FileService
 from .services.pipeline_service import PipelineService
@@ -76,18 +80,54 @@ def get_pipeline_service() -> PipelineService:
     return _pipeline_service
 
 
-async def get_db() -> AsyncGenerator:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Placeholder for database session dependency.
+    Get an async database session.
 
-    Currently not used as jobs are stored in memory.
-    Add database implementation here if persistence is needed.
+    Provides a SQLAlchemy async session for database operations.
+    The session is automatically closed when the request completes.
 
     Yields:
-        Database session (placeholder).
+        AsyncSession for database operations.
     """
-    # Placeholder for future database integration
-    yield None
+    session_factory = get_async_session()
+    if session_factory is None:
+        # Database not initialized yet
+        yield None
+        return
+
+    async with session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+
+async def get_job_repository(
+    session: AsyncSession = None
+) -> AsyncGenerator[JobRepository, None]:
+    """
+    Get a job repository instance with a database session.
+
+    Provides a JobRepository for database CRUD operations.
+    Creates its own session if one is not provided.
+
+    Args:
+        session: Optional async session (uses get_db if not provided).
+
+    Yields:
+        JobRepository for job persistence operations.
+    """
+    session_factory = get_async_session()
+    if session_factory is None:
+        yield None
+        return
+
+    async with session_factory() as session:
+        try:
+            yield JobRepository(session)
+        finally:
+            await session.close()
 
 
 def reset_services() -> None:

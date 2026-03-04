@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { uploadFile, deleteFile } from '@/lib/api'
+import { formatFileSize } from '@/lib/utils'
 
 interface FileUploadProps {
   /** Callback when a file is successfully uploaded */
@@ -120,12 +121,6 @@ export function FileUpload({
     [onFileRemoved]
   )
 
-  const formatSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
   return (
     <div className="space-y-3">
       {/* Compact Drop Zone */}
@@ -205,7 +200,7 @@ export function FileUpload({
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary text-sm"
             >
               <span className="truncate max-w-[150px]">{file.name}</span>
-              <span className="text-xs text-muted-foreground">{formatSize(file.size)}</span>
+              <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
               <button
                 className="text-muted-foreground hover:text-destructive transition-colors"
                 onClick={(e) => {

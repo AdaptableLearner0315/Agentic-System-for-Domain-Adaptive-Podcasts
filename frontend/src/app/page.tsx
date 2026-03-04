@@ -9,6 +9,7 @@ import { DurationSelector } from '@/components/DurationSelector'
 import { ProgressTracker } from '@/components/ProgressTracker'
 import { OutputPlayer } from '@/components/OutputPlayer'
 import { useGeneration } from '@/hooks/useGeneration'
+import { STORAGE_KEYS } from '@/lib/constants'
 import { PipelineMode, DurationOption } from '@/types'
 
 /**
@@ -86,7 +87,7 @@ export default function Home() {
 
   // Check for reuse data from History page on mount
   useEffect(() => {
-    const reuseData = sessionStorage.getItem('nell_reuse_job')
+    const reuseData = sessionStorage.getItem(STORAGE_KEYS.REUSE_JOB)
     if (reuseData) {
       try {
         const data = JSON.parse(reuseData)
@@ -98,7 +99,7 @@ export default function Home() {
         // Ignore invalid JSON
       }
       // Clear after reading
-      sessionStorage.removeItem('nell_reuse_job')
+      sessionStorage.removeItem(STORAGE_KEYS.REUSE_JOB)
     }
   }, [])
 

@@ -26,6 +26,9 @@ from .config import get_settings, Settings
 from .routes import pipelines, files, config, outputs
 from .websockets import progress
 from .models.responses import HealthResponse, ErrorResponse
+from .database.connection import init_db, close_db
+from .dependencies import get_job_manager
+from .logging_config import setup_logging, get_logger
 
 
 @asynccontextmanager
@@ -34,35 +37,55 @@ async def lifespan(app: FastAPI):
     Application lifespan handler.
 
     Handles startup and shutdown events:
-    - Startup: Initialize services, create directories
-    - Shutdown: Cleanup resources, cancel pending jobs
+    - Startup: Initialize database, load job history, create directories
+    - Shutdown: Persist jobs, close database connection
 
     Args:
         app: FastAPI application instance.
     """
     # Startup
     settings = get_settings()
+    logger = setup_logging(debug=settings.debug)
 
     # Ensure upload and output directories exist
     settings.upload_path.mkdir(parents=True, exist_ok=True)
     settings.output_path.mkdir(parents=True, exist_ok=True)
 
+    # Initialize database
+    logger.info("Initializing database...")
+    await init_db()
+    logger.info("Database ready: %s", settings.database_path.absolute())
+
+    # Enable persistence and load job history
+    job_manager = get_job_manager()
+    job_manager.enable_persistence()
+    loaded = await job_manager.load_jobs_from_db(days=settings.job_cache_days)
+    logger.info("Loaded %d jobs from history", loaded)
+
     # Validate API keys
     api_keys = settings.validate_api_keys()
     missing_keys = [k for k, v in api_keys.items() if not v]
     if missing_keys:
-        print(f"Warning: Missing API keys: {', '.join(missing_keys)}")
-        print("Some features may not work correctly.")
+        logger.warning("Missing API keys: %s", ", ".join(missing_keys))
+        logger.warning("Some features may not work correctly.")
 
-    print(f"🎙️  {settings.app_name} v{settings.app_version} starting...")
-    print(f"📁 Upload directory: {settings.upload_path.absolute()}")
-    print(f"📁 Output directory: {settings.output_path.absolute()}")
+    logger.info("%s v%s starting...", settings.app_name, settings.app_version)
+    logger.info("Upload directory: %s", settings.upload_path.absolute())
+    logger.info("Output directory: %s", settings.output_path.absolute())
 
     yield
 
     # Shutdown
-    print("🛑 Shutting down Nell Podcast API...")
-    # Cleanup can be added here (e.g., cancel running jobs)
+    logger.info("Shutting down Nell Podcast API...")
+
+    # Persist any pending jobs
+    persisted = await job_manager.persist_all_jobs()
+    if persisted > 0:
+        logger.info("Persisted %d jobs to database", persisted)
+
+    # Close database connection
+    await close_db()
+    logger.info("Database connection closed")
 
 
 def create_app() -> FastAPI:

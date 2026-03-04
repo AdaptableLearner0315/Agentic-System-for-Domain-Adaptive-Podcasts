@@ -549,8 +549,11 @@ def cmd_full_mode(args):
         if mode == "normal":
             from pipelines.normal_pipeline import NormalPipeline, run_normal_pipeline
             from utils.progress_stream import ProgressStream, print_progress
+            import uuid
 
-            pipeline = NormalPipeline()
+            # Generate unique job_id for CLI runs to avoid overwriting outputs
+            job_id = str(uuid.uuid4())[:8]
+            pipeline = NormalPipeline(job_id=job_id)
             progress = ProgressStream(callback=print_progress) if show_progress else None
 
             # Pass the already-processed content text directly

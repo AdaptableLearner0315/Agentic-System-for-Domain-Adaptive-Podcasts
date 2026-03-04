@@ -159,9 +159,11 @@ async def progress_websocket(
     from ..dependencies import get_job_manager
     job_manager = get_job_manager()
 
-    # Verify job exists
+    # Verify job exists (must accept before closing per WebSocket protocol)
     job = job_manager.get_job(job_id)
     if not job:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "job_id": job_id, "error": "Job not found"})
         await websocket.close(code=4004, reason="Job not found")
         return
 
@@ -171,6 +173,9 @@ async def progress_websocket(
     # Start the adapter's queue processor as a background task
     adapter = await adapter_manager.get_adapter(job_id)
     queue_task = asyncio.create_task(adapter.process_queue())
+
+    # Define listener before try block so it's always in scope for finally
+    send_update = None
 
     try:
         # Send initial status
@@ -279,7 +284,8 @@ async def progress_websocket(
             await queue_task
         except asyncio.CancelledError:
             pass
-        await adapter.remove_listener(send_update)
+        if send_update is not None:
+            await adapter.remove_listener(send_update)
         await manager.disconnect(job_id, websocket)
 
 

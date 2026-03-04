@@ -7,6 +7,11 @@ interface FilterBarProps {
   onFilterChange: (status: JobStatus | null) => void
 }
 
+/**
+ * Configuration for a filter option button.
+ * @property label - Display text for the filter button
+ * @property value - JobStatus to filter by, or null for "All"
+ */
 interface FilterOption {
   label: string
   value: JobStatus | null

@@ -330,9 +330,9 @@ export interface PhaseTimings {
  * Sub-progress for parallel asset generation.
  */
 export interface ParallelStatus {
-  tts: { done: number; total: number }
-  bgm: { done: number; total: number }
-  images: { done: number; total: number }
+  tts: { done: number; total: number; elapsed_s?: number }
+  bgm: { done: number; total: number; elapsed_s?: number }
+  images: { done: number; total: number; elapsed_s?: number }
 }
 
 /**

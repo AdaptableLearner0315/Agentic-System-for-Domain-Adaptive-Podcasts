@@ -7,7 +7,7 @@ connections, enabling real-time progress updates to clients.
 
 import asyncio
 import json
-from typing import Callable, Optional, Dict, Any, List
+from typing import Callable, Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from ..models.enums import GenerationPhase
@@ -98,6 +98,9 @@ class ProgressAdapter:
         self._listeners: List[Callable] = []
         self._queue: asyncio.Queue = asyncio.Queue()
         self._lock = asyncio.Lock()
+        # Dedup state: skip updates where phase and percent haven't changed
+        self._last_phase: Optional[GenerationPhase] = None
+        self._last_percent: Optional[float] = None
 
     def on_progress(self, update: Any) -> None:
         """
@@ -105,17 +108,30 @@ class ProgressAdapter:
 
         This method is called synchronously by the pipeline's
         ProgressStream. It converts the update and queues it
-        for async broadcasting.
+        for async broadcasting. Deduplicates updates to avoid
+        flooding: only sends if phase changed or percent changed by >1%.
 
         Args:
             update: ProgressUpdate from ProgressStream.
         """
+        phase = GenerationPhase(update.phase.value)
+        percent = update.progress_percent
+
+        # Dedup: only send if phase changed or percent changed by >1%
+        if (self._last_phase == phase
+                and self._last_percent is not None
+                and abs(percent - self._last_percent) < 1.0):
+            return
+
+        self._last_phase = phase
+        self._last_percent = percent
+
         # Convert to our ProgressUpdate format
         progress_update = ProgressUpdate(
             job_id=self.job_id,
-            phase=GenerationPhase(update.phase.value),
+            phase=phase,
             message=update.message,
-            progress_percent=update.progress_percent,
+            progress_percent=percent,
             current_step=update.current_step,
             total_steps=update.total_steps,
             eta_seconds=update.eta_seconds,
@@ -179,7 +195,7 @@ class ProgressAdapter:
             try:
                 update = await asyncio.wait_for(
                     self._queue.get(),
-                    timeout=1.0
+                    timeout=0.1
                 )
                 await self.broadcast(update)
             except asyncio.TimeoutError:
