@@ -23,6 +23,7 @@ class GenerationRequest(BaseModel):
         file_ids: List of uploaded file IDs to use as input
         guidance: Additional instructions for generation
         mode: Pipeline mode (normal or pro)
+        target_duration_minutes: Target podcast duration in minutes (1-30)
         config: Pro mode configuration overrides
     """
     prompt: Optional[str] = Field(
@@ -42,6 +43,12 @@ class GenerationRequest(BaseModel):
     mode: str = Field(
         "normal",
         description="Pipeline mode: 'normal' (fast) or 'pro' (quality)"
+    )
+    target_duration_minutes: Optional[int] = Field(
+        None,
+        ge=1,
+        le=30,
+        description="Target podcast duration in minutes. If not specified, extracted from prompt or defaults to 10."
     )
     config: Optional[Dict[str, Any]] = Field(
         None,

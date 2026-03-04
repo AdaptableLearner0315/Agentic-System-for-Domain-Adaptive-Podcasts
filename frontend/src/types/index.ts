@@ -24,6 +24,12 @@ export type JobStatus =
 export type PipelineMode = 'normal' | 'pro'
 
 /**
+ * Duration option value for the duration selector.
+ * 'auto' means duration is extracted from prompt or uses default.
+ */
+export type DurationOption = 'auto' | 3 | 5 | 10 | 15 | 20
+
+/**
  * Current phase of the generation process.
  */
 export type GenerationPhase =
@@ -55,6 +61,8 @@ export interface GenerationRequest {
   guidance?: string
   /** Pipeline mode: 'normal' (fast) or 'pro' (quality) */
   mode: PipelineMode
+  /** Target podcast duration in minutes (1-30). Auto-detected from prompt if not specified. */
+  target_duration_minutes?: number
   /** Pro mode configuration overrides */
   config?: ProConfig
 }

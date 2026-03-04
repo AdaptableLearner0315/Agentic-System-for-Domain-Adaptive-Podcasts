@@ -43,6 +43,20 @@ from utils.progress_stream import (
     print_progress,
 )
 
+from utils.duration_parser import (
+    extract_duration_minutes,
+    remove_duration_from_prompt,
+    parse_duration_and_prompt,
+    get_default_duration,
+    get_duration_range,
+)
+
+from utils.duration_evaluator import (
+    DurationEvaluation,
+    DurationEvaluator,
+    evaluate_podcast_duration,
+)
+
 __all__ = [
     # FAL API
     'call_fal_api',
@@ -72,4 +86,14 @@ __all__ = [
     'ProgressStream',
     'stream_generation',
     'print_progress',
+    # Duration parsing
+    'extract_duration_minutes',
+    'remove_duration_from_prompt',
+    'parse_duration_and_prompt',
+    'get_default_duration',
+    'get_duration_range',
+    # Duration evaluation
+    'DurationEvaluation',
+    'DurationEvaluator',
+    'evaluate_podcast_duration',
 ]

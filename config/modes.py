@@ -175,6 +175,99 @@ def get_assembly_config(mode: str) -> Dict[str, Any]:
     return get_mode_config(mode)["assembly"]
 
 
+def calculate_bgm_segments(duration_minutes: int, mode: str = "normal") -> int:
+    """
+    Calculate the number of BGM segments based on duration and mode.
+
+    Normal mode: 2-4 segments (simpler)
+    Pro mode: 4-9 segments (richer soundscape)
+
+    Args:
+        duration_minutes: Target podcast duration in minutes
+        mode: Pipeline mode ('normal' or 'pro')
+
+    Returns:
+        Number of BGM segments to generate
+    """
+    duration_minutes = max(1, min(30, duration_minutes))
+
+    if mode.lower() == "normal":
+        # Normal mode: simpler BGM structure
+        if duration_minutes <= 3:
+            return 2  # Intro + outro
+        elif duration_minutes <= 7:
+            return 3  # Intro + main + outro
+        elif duration_minutes <= 15:
+            return 4  # Intro + 2 mains + outro
+        else:
+            return 5  # Intro + 3 mains + outro
+    else:
+        # Pro mode: richer BGM with more variety
+        if duration_minutes <= 3:
+            return 4
+        elif duration_minutes <= 7:
+            return 6
+        elif duration_minutes <= 12:
+            return 7
+        elif duration_minutes <= 18:
+            return 8
+        else:
+            return 9  # Full daisy-chain
+
+
+def calculate_image_count(duration_minutes: int, mode: str = "normal") -> int:
+    """
+    Calculate the number of images based on duration and mode.
+
+    Roughly 1 image per 30-60 seconds of content.
+
+    Normal mode: 2-8 images (faster generation)
+    Pro mode: 4-16 images (richer visuals)
+
+    Args:
+        duration_minutes: Target podcast duration in minutes
+        mode: Pipeline mode ('normal' or 'pro')
+
+    Returns:
+        Number of images to generate
+    """
+    duration_minutes = max(1, min(30, duration_minutes))
+
+    if mode.lower() == "normal":
+        # Normal mode: ~1 image per minute, min 2, max 8
+        count = max(2, min(8, duration_minutes))
+        return count
+    else:
+        # Pro mode: ~1.5 images per minute, min 4, max 16
+        count = max(4, min(16, int(duration_minutes * 1.5)))
+        return count
+
+
+def calculate_tts_parallel_workers(duration_minutes: int, mode: str = "normal") -> int:
+    """
+    Calculate optimal number of parallel TTS workers based on duration.
+
+    More workers for longer content to maintain reasonable generation time.
+
+    Args:
+        duration_minutes: Target podcast duration in minutes
+        mode: Pipeline mode
+
+    Returns:
+        Number of parallel TTS workers
+    """
+    # Base workers on expected chunk count
+    # Roughly 2-4 chunks per minute of content
+    expected_chunks = duration_minutes * 3
+
+    if mode.lower() == "normal":
+        # Normal mode: aggressive parallelism
+        return min(10, max(5, expected_chunks // 2))
+    else:
+        # Pro mode: sentence-level, more workers
+        return 10  # Always max for pro mode
+
+
 # Voice style configurations (for Pro mode)
 VOICE_STYLE_PRESETS = {
     "default": {
@@ -249,6 +342,9 @@ __all__ = [
     'get_image_config',
     'get_script_config',
     'get_assembly_config',
+    'calculate_bgm_segments',
+    'calculate_image_count',
+    'calculate_tts_parallel_workers',
     'VOICE_STYLE_PRESETS',
     'MUSIC_GENRE_PRESETS',
     'IMAGE_STYLE_PRESETS',

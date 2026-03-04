@@ -25,7 +25,10 @@ class ContentGeneratorAgent(BaseAgent):
     Output: Raw transcript text (ready for ScriptDesignerAgent.enhance())
     """
 
-    # Length targets for different modes
+    # Words per minute for podcast narration (standard speaking pace)
+    WORDS_PER_MINUTE = 150
+
+    # Length targets for different modes (legacy, kept for backwards compatibility)
     LENGTH_TARGETS = {
         "short": {
             "words": 600,
@@ -60,7 +63,7 @@ class ContentGeneratorAgent(BaseAgent):
 
         Args:
             topic: Topic/prompt for generation
-            **kwargs: Additional arguments (reference_content, guidance, length)
+            **kwargs: Additional arguments (reference_content, guidance, length, target_duration_minutes)
 
         Returns:
             Generated transcript text
@@ -70,6 +73,7 @@ class ContentGeneratorAgent(BaseAgent):
             reference_content=kwargs.get("reference_content"),
             guidance=kwargs.get("guidance"),
             length=kwargs.get("length", "standard"),
+            target_duration_minutes=kwargs.get("target_duration_minutes"),
             feedback=kwargs.get("feedback"),
         )
 
@@ -79,6 +83,7 @@ class ContentGeneratorAgent(BaseAgent):
         reference_content: Optional[str] = None,
         guidance: Optional[str] = None,
         length: str = "standard",
+        target_duration_minutes: Optional[int] = None,
         feedback: Optional[str] = None,
     ) -> str:
         """
@@ -89,6 +94,8 @@ class ContentGeneratorAgent(BaseAgent):
             reference_content: Optional content from reference files to inform generation
             guidance: Optional style/focus guidance (e.g., "for beginners", "technical deep-dive")
             length: Target length - "short" (600w), "standard" (1200w), "long" (2000w)
+                    Ignored if target_duration_minutes is provided.
+            target_duration_minutes: Target podcast duration in minutes (overrides length)
             feedback: Optional revision feedback from previous attempt
 
         Returns:
@@ -96,13 +103,18 @@ class ContentGeneratorAgent(BaseAgent):
         """
         self.log(f"Generating content about: {topic[:50]}...")
 
-        # Validate length
-        if length not in self.LENGTH_TARGETS:
-            self.log(f"Unknown length '{length}', using 'standard'", level="warning")
-            length = "standard"
-
-        target_words = self.LENGTH_TARGETS[length]["words"]
-        length_description = self.LENGTH_TARGETS[length]["description"]
+        # Determine target words - duration takes priority over length preset
+        if target_duration_minutes is not None:
+            target_words = target_duration_minutes * self.WORDS_PER_MINUTE
+            length_description = f"{target_duration_minutes}-minute podcast"
+            self.log(f"Using duration-based target: {target_duration_minutes} min = {target_words} words")
+        else:
+            # Fall back to length preset
+            if length not in self.LENGTH_TARGETS:
+                self.log(f"Unknown length '{length}', using 'standard'", level="warning")
+                length = "standard"
+            target_words = self.LENGTH_TARGETS[length]["words"]
+            length_description = self.LENGTH_TARGETS[length]["description"]
 
         # Build the generation prompt
         prompt = self._build_generation_prompt(

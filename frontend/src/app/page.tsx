@@ -5,10 +5,11 @@ import { Header } from '@/components/Header'
 import { PromptInput } from '@/components/PromptInput'
 import { FileUpload } from '@/components/FileUpload'
 import { ModeSelector } from '@/components/ModeSelector'
+import { DurationSelector } from '@/components/DurationSelector'
 import { ProgressTracker } from '@/components/ProgressTracker'
 import { OutputPlayer } from '@/components/OutputPlayer'
 import { useGeneration } from '@/hooks/useGeneration'
-import { PipelineMode, JobStatus } from '@/types'
+import { PipelineMode, DurationOption } from '@/types'
 
 /**
  * Collapsible section component for stacked card layout.
@@ -69,6 +70,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState('')
   const [guidance, setGuidance] = useState('')
   const [mode, setMode] = useState<PipelineMode>('normal')
+  const [duration, setDuration] = useState<DurationOption>('auto')
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
 
   // Generation hook handles all API interactions
@@ -91,6 +93,7 @@ export default function Home() {
         if (data.prompt) setPrompt(data.prompt)
         if (data.guidance) setGuidance(data.guidance)
         if (data.mode) setMode(data.mode)
+        if (data.duration) setDuration(data.duration)
       } catch {
         // Ignore invalid JSON
       }
@@ -110,6 +113,8 @@ export default function Home() {
       file_ids: uploadedFiles.length > 0 ? uploadedFiles : undefined,
       guidance: guidance || undefined,
       mode,
+      // Only pass duration if not 'auto' - backend will extract from prompt or use default
+      target_duration_minutes: duration !== 'auto' ? duration : undefined,
     })
   }
 
@@ -124,6 +129,7 @@ export default function Home() {
   const handleReset = () => {
     setPrompt('')
     setGuidance('')
+    setDuration('auto')
     setUploadedFiles([])
     reset()
   }
@@ -166,7 +172,7 @@ export default function Home() {
 
               {/* Section: Style & Mode */}
               <Section title="Style & Mode" defaultOpen={true}>
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <input
                     type="text"
                     className="input"
@@ -183,6 +189,11 @@ export default function Home() {
                       disabled={isGenerating}
                     />
                   </div>
+                  <DurationSelector
+                    duration={duration}
+                    onDurationChange={setDuration}
+                    disabled={isGenerating}
+                  />
                 </div>
               </Section>
 

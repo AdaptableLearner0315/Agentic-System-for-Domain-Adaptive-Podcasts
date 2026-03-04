@@ -40,6 +40,7 @@ class NormalPipelineResult:
     Attributes:
         success: Whether the pipeline completed without errors.
         output_path: Path to the final video (or audio if no images).
+        audio_output_path: Path to the mixed audio file (MP3).
         script: Enhanced script dictionary, or None on failure.
         tts_files: Per-chunk TTS generation results with paths.
         bgm_files: Per-segment BGM generation results with paths.
@@ -49,6 +50,7 @@ class NormalPipelineResult:
     """
     success: bool
     output_path: Optional[str]
+    audio_output_path: Optional[str]
     script: Optional[Dict[str, Any]]
     tts_files: List[Dict[str, Any]]
     bgm_files: List[Dict[str, Any]]
@@ -90,10 +92,21 @@ class NormalPipeline:
         # Ensure directories exist
         ensure_directories()
 
+        # Shared TTSNarrator instance (avoids re-initializing per chunk)
+        self._narrator = None
+
         # Asset managers (lazy-loaded)
         self._voice_manager = None
         self._music_manager = None
         self._image_manager = None
+
+    @property
+    def narrator(self):
+        """Lazy-load shared TTSNarrator instance."""
+        if self._narrator is None:
+            from agents.audio_designer.tts_narrator import TTSNarrator
+            self._narrator = TTSNarrator(output_dir=AUDIO_DIR / "tts")
+        return self._narrator
 
     @property
     def voice_manager(self):
@@ -160,6 +173,7 @@ class NormalPipeline:
             return NormalPipelineResult(
                 success=False,
                 output_path=None,
+                audio_output_path=None,
                 script=None,
                 tts_files=[],
                 bgm_files=[],
@@ -256,6 +270,7 @@ class NormalPipeline:
             return NormalPipelineResult(
                 success=True,
                 output_path=final_video,
+                audio_output_path=final_audio,
                 script=script,
                 tts_files=tts_results,
                 bgm_files=bgm_results,
@@ -272,6 +287,7 @@ class NormalPipeline:
             return NormalPipelineResult(
                 success=False,
                 output_path=None,
+                audio_output_path=None,
                 script=None,
                 tts_files=[],
                 bgm_files=[],
@@ -301,11 +317,17 @@ class NormalPipeline:
 
         enhancer = ScriptDesignerAgent(model=model_id)
 
+        # Get target duration from content metadata (set by SmartInputHandler)
+        target_duration = content.metadata.get("target_duration_minutes")
+
         # Run enhancement in thread pool
         loop = asyncio.get_event_loop()
         script = await loop.run_in_executor(
             None,
-            lambda: enhancer.enhance(content.text)
+            lambda: enhancer.enhance(
+                content.text,
+                target_duration_minutes=target_duration
+            )
         )
 
         # Save script
@@ -372,6 +394,9 @@ class NormalPipeline:
         bgm_total = len(bgm_tasks)
         img_total = len(image_tasks)
 
+        # Track the last completed item per component for preview text
+        last_preview = {'tts': '', 'bgm': '', 'images': ''}
+
         def update_asset_progress(component: str, current: int, total: int) -> None:
             """Callback shared by all three executors to emit a single unified progress update.
 
@@ -395,6 +420,19 @@ class NormalPipeline:
             grand_total = tts_total + bgm_total + img_total
             grand_done = tts_done + bgm_done + img_done
 
+            # Build preview text from current component activity
+            preview = None
+            if component == 'tts' and current <= len(tts_tasks):
+                task = tts_tasks[min(current, len(tts_tasks)) - 1] if current > 0 else None
+                if task:
+                    preview = task.get('text', '')[:80]
+                    last_preview['tts'] = preview
+            elif component == 'images' and current <= len(image_tasks):
+                task = image_tasks[min(current, len(image_tasks)) - 1] if current > 0 else None
+                if task:
+                    preview = task.get('prompt', '')[:80]
+                    last_preview['images'] = preview
+
             if progress:
                 progress.generating_assets(
                     step=grand_done,
@@ -405,7 +443,8 @@ class NormalPipeline:
                             'tts': {'done': tts_done, 'total': tts_total},
                             'bgm': {'done': bgm_done, 'total': bgm_total},
                             'images': {'done': img_done, 'total': img_total},
-                        }
+                        },
+                        'preview': preview or last_preview.get('tts') or last_preview.get('images'),
                     }
                 )
 
@@ -463,7 +502,11 @@ class NormalPipeline:
         if progress:
             progress.assembling_video("Creating video...")
         video_start = time.time()
-        final_video = await self._assemble_video(final_audio, image_results)
+        try:
+            final_video = await self._assemble_video(final_audio, image_results)
+        except Exception as video_err:
+            print(f"[NormalPipeline] Video assembly failed, returning audio: {video_err}")
+            final_video = final_audio
         timings['video_assembly'] = round(time.time() - video_start, 1)
 
         return tts_results, bgm_results, image_results, final_audio, final_video, timings
@@ -557,11 +600,8 @@ class NormalPipeline:
         return tasks
 
     def _generate_tts_chunk(self, text: str, filename: str) -> Optional[str]:
-        """Generate TTS for a single chunk."""
-        from agents.audio_designer.tts_narrator import TTSNarrator
-
-        narrator = TTSNarrator(output_dir=AUDIO_DIR / "tts")
-        return narrator.generate_speech(text, filename)
+        """Generate TTS for a single chunk using shared narrator."""
+        return self.narrator.generate_speech(text, filename)
 
     def _generate_bgm_segment(
         self,

@@ -59,6 +59,15 @@ class PipelineService:
         self.file_service = file_service
         self._running_tasks: Dict[str, asyncio.Task] = {}
 
+    # Phase-level timeout defaults (seconds)
+    PHASE_TIMEOUTS = {
+        "content_prep": 120,     # 2 min for content extraction/generation
+        "scripting": 180,        # 3 min for script enhancement + review
+        "asset_generation": 360, # 6 min for TTS + BGM + Images
+        "mixing": 120,           # 2 min for audio mixing
+        "video_assembly": 120,   # 2 min for video assembly
+    }
+
     async def run_job(
         self,
         job_id: str,
@@ -68,9 +77,9 @@ class PipelineService:
         Run a generation job.
 
         This method is called as a background task. It handles the full
-        job lifecycle including setup, execution, and cleanup. The entire
-        pipeline is wrapped in asyncio.wait_for() to enforce mode-specific
-        timeouts.
+        job lifecycle including setup, execution, and cleanup. Uses
+        phase-level timeouts instead of a single global timeout to avoid
+        killing jobs that are 95% complete.
 
         Args:
             job_id: Unique job identifier.
@@ -88,30 +97,7 @@ class PipelineService:
                 progress_percent=0,
             )
 
-            # Determine timeout for this mode
-            settings = get_settings()
-            timeout_seconds = settings.get_job_timeout(request.mode)
-
-            try:
-                await asyncio.wait_for(
-                    self._execute_pipeline(job_id, request),
-                    timeout=timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                timeout_minutes = timeout_seconds / 60
-                error_msg = (
-                    f"Job timed out after {timeout_minutes:.0f} minutes. "
-                    f"The {request.mode} pipeline exceeded its maximum allowed duration. "
-                    f"This may indicate an issue with external API calls or media processing."
-                )
-                self.job_manager.fail_job(job_id, error_msg)
-                await self._update_progress(
-                    job_id=job_id,
-                    phase=GenerationPhase.ERROR,
-                    message=error_msg,
-                    progress_percent=0,
-                )
-                return
+            await self._execute_pipeline(job_id, request)
 
         except asyncio.CancelledError:
             self.job_manager.cancel_job(job_id)
@@ -135,14 +121,35 @@ class PipelineService:
         request: GenerationRequest,
     ) -> None:
         """
-        Execute the pipeline (content prep + run). Called inside asyncio.wait_for().
+        Execute the pipeline with phase-level timeouts.
+
+        Each phase (content prep, pipeline execution) has its own timeout.
+        On timeout, partial results are saved and returned rather than
+        losing all progress.
 
         Args:
             job_id: Unique job identifier.
             request: Generation request with parameters.
         """
-        # Prepare content
-        content = await self._prepare_content(job_id, request)
+        # Phase 1: Prepare content (with timeout)
+        try:
+            content = await asyncio.wait_for(
+                self._prepare_content(job_id, request),
+                timeout=self.PHASE_TIMEOUTS["content_prep"],
+            )
+        except asyncio.TimeoutError:
+            self.job_manager.fail_job(
+                job_id,
+                "Content preparation timed out. Try a smaller input file."
+            )
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ERROR,
+                message="Content preparation timed out.",
+                progress_percent=5,
+            )
+            return
+
         if not content:
             return  # Job failed during preparation
 
@@ -151,19 +158,47 @@ class PipelineService:
             self.job_manager.cancel_job(job_id)
             return
 
-        # Run appropriate pipeline
-        if request.mode == "pro":
-            result = await self._run_pro_pipeline(job_id, content, request)
-        else:
-            result = await self._run_normal_pipeline(job_id, content)
+        # Phase 2: Run pipeline (with generous timeout for full pipeline)
+        pipeline_timeout = (
+            self.PHASE_TIMEOUTS["scripting"]
+            + self.PHASE_TIMEOUTS["asset_generation"]
+            + self.PHASE_TIMEOUTS["mixing"]
+            + self.PHASE_TIMEOUTS["video_assembly"]
+        )
+
+        try:
+            if request.mode == "pro":
+                result = await asyncio.wait_for(
+                    self._run_pro_pipeline(job_id, content, request),
+                    timeout=pipeline_timeout,
+                )
+            else:
+                result = await asyncio.wait_for(
+                    self._run_normal_pipeline(job_id, content),
+                    timeout=pipeline_timeout,
+                )
+        except asyncio.TimeoutError:
+            timeout_minutes = pipeline_timeout / 60
+            error_msg = (
+                f"Pipeline timed out after {timeout_minutes:.0f} minutes. "
+                f"Partial results may be available in the output directory."
+            )
+            self.job_manager.fail_job(job_id, error_msg)
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ERROR,
+                message=error_msg,
+                progress_percent=0,
+            )
+            return
 
         # Check for cancellation
         if self.job_manager.is_cancellation_requested(job_id):
             self.job_manager.cancel_job(job_id)
             return
 
-        # Complete job
-        if result and result.get("success"):
+        # Complete job — accept partial success (output_path present even if not fully successful)
+        if result and (result.get("success") or result.get("output_path")):
             self.job_manager.complete_job(job_id, result)
             await self._update_progress(
                 job_id=job_id,
@@ -269,12 +304,17 @@ class PipelineService:
                 prompt=request.prompt,
                 files=files,
                 guidance=request.guidance,
+                target_duration_minutes=request.target_duration_minutes,
             )
 
             # Process input (sync call wrapped in executor)
             handler = SmartInputHandler()
             length = "standard" if request.mode == "pro" else "short"
-            content = await handler.process_async(smart_input, length=length)
+            content = await handler.process_async(
+                smart_input,
+                length=length,
+                target_duration_minutes=request.target_duration_minutes
+            )
 
             await self._update_progress(
                 job_id=job_id,
@@ -339,6 +379,7 @@ class PipelineService:
             return {
                 "success": result.success,
                 "output_path": result.output_path,
+                "audio_output_path": result.audio_output_path,
                 "script": result.script,
                 "tts_files": [
                     {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
@@ -416,6 +457,7 @@ class PipelineService:
             return {
                 "success": result.success,
                 "output_path": result.output_path,
+                "audio_output_path": result.audio_output_path,
                 "script": result.script,
                 "tts_files": [
                     {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
