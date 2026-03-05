@@ -1,0 +1,228 @@
+{
+  "accents": {
+    "risers": [
+      {
+        "id": "riser_tension_001",
+        "path": "risers/tension_001.wav",
+        "type": "riser",
+        "emotion_affinity": ["tension", "restlessness", "intensity"],
+        "energy_range": [5, 8],
+        "duration_ms": 3000,
+        "tags": ["building", "sweep", "anticipation"]
+      },
+      {
+        "id": "riser_tension_002",
+        "path": "risers/tension_002.wav",
+        "type": "riser",
+        "emotion_affinity": ["tension", "intensity", "rebellion"],
+        "energy_range": [7, 10],
+        "duration_ms": 4000,
+        "tags": ["intense", "dramatic", "build"]
+      },
+      {
+        "id": "riser_excitement_001",
+        "path": "risers/excitement_001.wav",
+        "type": "riser",
+        "emotion_affinity": ["excitement", "explosive_energy", "triumph"],
+        "energy_range": [7, 10],
+        "duration_ms": 3500,
+        "tags": ["energetic", "bright", "uplifting"]
+      },
+      {
+        "id": "riser_wonder_001",
+        "path": "risers/wonder_001.wav",
+        "type": "riser",
+        "emotion_affinity": ["wonder", "liberation", "triumph"],
+        "energy_range": [4, 7],
+        "duration_ms": 4000,
+        "tags": ["ethereal", "airy", "expansive"]
+      },
+      {
+        "id": "riser_intrigue_001",
+        "path": "risers/intrigue_001.wav",
+        "type": "riser",
+        "emotion_affinity": ["intrigue", "curiosity", "tension"],
+        "energy_range": [3, 6],
+        "duration_ms": 3000,
+        "tags": ["mysterious", "subtle", "building"]
+      }
+    ],
+    "impacts": [
+      {
+        "id": "impact_triumph_001",
+        "path": "impacts/triumph_001.wav",
+        "type": "impact",
+        "emotion_affinity": ["triumph", "explosive_energy", "liberation"],
+        "energy_range": [8, 10],
+        "duration_ms": 500,
+        "tags": ["hit", "powerful", "climactic"]
+      },
+      {
+        "id": "impact_triumph_002",
+        "path": "impacts/triumph_002.wav",
+        "type": "impact",
+        "emotion_affinity": ["triumph", "excitement", "wonder"],
+        "energy_range": [7, 9],
+        "duration_ms": 600,
+        "tags": ["brass", "orchestral", "grand"]
+      },
+      {
+        "id": "impact_tension_001",
+        "path": "impacts/tension_001.wav",
+        "type": "impact",
+        "emotion_affinity": ["tension", "intensity", "rebellion"],
+        "energy_range": [7, 10],
+        "duration_ms": 400,
+        "tags": ["dark", "percussive", "dramatic"]
+      },
+      {
+        "id": "impact_explosive_001",
+        "path": "impacts/explosive_001.wav",
+        "type": "impact",
+        "emotion_affinity": ["explosive_energy", "rebellion", "intensity"],
+        "energy_range": [9, 10],
+        "duration_ms": 700,
+        "tags": ["maximum", "hit", "powerful"]
+      },
+      {
+        "id": "impact_neutral_001",
+        "path": "impacts/neutral_001.wav",
+        "type": "impact",
+        "emotion_affinity": ["neutral", "curiosity", "mastery"],
+        "energy_range": [4, 6],
+        "duration_ms": 300,
+        "tags": ["soft", "subtle", "accent"]
+      }
+    ],
+    "swells": [
+      {
+        "id": "swell_wonder_001",
+        "path": "swells/wonder_001.wav",
+        "type": "swell",
+        "emotion_affinity": ["wonder", "triumph", "liberation"],
+        "energy_range": [4, 7],
+        "duration_ms": 2000,
+        "tags": ["emotional", "crescendo", "uplifting"]
+      },
+      {
+        "id": "swell_wonder_002",
+        "path": "swells/wonder_002.wav",
+        "type": "swell",
+        "emotion_affinity": ["wonder", "reflection", "melancholy"],
+        "energy_range": [3, 5],
+        "duration_ms": 1500,
+        "tags": ["gentle", "strings", "emotional"]
+      },
+      {
+        "id": "swell_triumph_001",
+        "path": "swells/triumph_001.wav",
+        "type": "swell",
+        "emotion_affinity": ["triumph", "liberation", "excitement"],
+        "energy_range": [7, 10],
+        "duration_ms": 2000,
+        "tags": ["victorious", "orchestral", "grand"]
+      },
+      {
+        "id": "swell_liberation_001",
+        "path": "swells/liberation_001.wav",
+        "type": "swell",
+        "emotion_affinity": ["liberation", "wonder", "excitement"],
+        "energy_range": [7, 9],
+        "duration_ms": 1800,
+        "tags": ["freeing", "soaring", "euphoric"]
+      },
+      {
+        "id": "swell_melancholy_001",
+        "path": "swells/melancholy_001.wav",
+        "type": "swell",
+        "emotion_affinity": ["melancholy", "reflection", "intrigue"],
+        "energy_range": [2, 4],
+        "duration_ms": 1500,
+        "tags": ["sad", "emotional", "strings"]
+      }
+    ],
+    "drops": [
+      {
+        "id": "drop_tension_001",
+        "path": "drops/tension_001.wav",
+        "type": "drop",
+        "emotion_affinity": ["tension", "intensity", "restlessness"],
+        "energy_range": [6, 9],
+        "duration_ms": 800,
+        "tags": ["release", "sudden", "dramatic"]
+      },
+      {
+        "id": "drop_explosive_001",
+        "path": "drops/explosive_001.wav",
+        "type": "drop",
+        "emotion_affinity": ["explosive_energy", "triumph", "rebellion"],
+        "energy_range": [9, 10],
+        "duration_ms": 1000,
+        "tags": ["powerful", "release", "climactic"]
+      },
+      {
+        "id": "drop_reflection_001",
+        "path": "drops/reflection_001.wav",
+        "type": "drop",
+        "emotion_affinity": ["reflection", "melancholy", "neutral"],
+        "energy_range": [2, 4],
+        "duration_ms": 1200,
+        "tags": ["gentle", "fadeout", "contemplative"]
+      },
+      {
+        "id": "drop_excitement_001",
+        "path": "drops/excitement_001.wav",
+        "type": "drop",
+        "emotion_affinity": ["excitement", "triumph", "liberation"],
+        "energy_range": [7, 9],
+        "duration_ms": 900,
+        "tags": ["energetic", "release", "bright"]
+      },
+      {
+        "id": "drop_neutral_001",
+        "path": "drops/neutral_001.wav",
+        "type": "drop",
+        "emotion_affinity": ["neutral", "curiosity", "reflection"],
+        "energy_range": [3, 5],
+        "duration_ms": 700,
+        "tags": ["subtle", "soft", "transition"]
+      }
+    ]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "total_accents": 20,
+    "accent_types": ["risers", "impacts", "swells", "drops"],
+    "type_descriptions": {
+      "risers": "Building sweeps placed before tension peaks",
+      "impacts": "Percussive hits at peak moments",
+      "swells": "Emotional crescendos for revelations",
+      "drops": "Sudden reductions/silence after climax"
+    },
+    "emotions_covered": [
+      "wonder",
+      "curiosity",
+      "tension",
+      "triumph",
+      "melancholy",
+      "intrigue",
+      "excitement",
+      "reflection",
+      "restlessness",
+      "explosive_energy",
+      "rebellion",
+      "liberation",
+      "experimentation",
+      "mastery",
+      "intensity",
+      "neutral"
+    ],
+    "energy_range": {
+      "min": 2,
+      "max": 10
+    },
+    "format": "wav",
+    "sample_rate": 44100,
+    "bit_depth": 24
+  }
+}

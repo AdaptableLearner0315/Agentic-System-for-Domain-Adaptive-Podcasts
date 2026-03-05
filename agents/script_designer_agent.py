@@ -13,6 +13,7 @@ Inherits from BaseAgent for common LLM and output functionality.
 
 from typing import Dict, Any, Optional, Tuple
 from agents.base_agent import BaseAgent
+from config.llm import MODEL_OPTIONS
 
 
 # Words per minute for podcast narration
@@ -72,10 +73,45 @@ def calculate_script_structure(duration_minutes: int) -> Dict[str, Any]:
     }
 
 
+CONVERSATIONAL_STYLE_GUIDELINES = """
+## Conversational Drama Guidelines
+
+Create an engaging two-person dialogue with these elements:
+
+**Cliffhangers & Suspense:**
+- End each module with an unresolved question or teaser
+- Host 1 hints at information Host 2 (and the audience) doesn't know yet
+- Use phrases like "But here's where it gets interesting..." or "Wait, you haven't heard the best part"
+
+**Mystery & Reveals:**
+- Structure information as a gradual reveal across modules
+- Plant questions early, answer them later
+- Create "aha moments" where pieces click together
+
+**Pacing & Tension:**
+- Alternate between rapid-fire exchanges (tension) and longer explanations (breathing room)
+- Build tension_level from 1→5 across each module, reset at module boundaries
+- Use interruptions and reactions: "Wait, are you serious?" / "Hold on, let me get this straight..."
+
+**Speaker Dynamics:**
+- Host 1 (host_1): The knowledgeable one who controls the reveals
+- Host 2 (host_2): The curious one who asks the questions the audience is thinking
+- Natural back-and-forth, not scripted Q&A
+
+**Emotional Arc per Module:**
+- Opening: Intrigue hook
+- Middle: Building tension with new information
+- End: Cliffhanger or partial reveal that demands continuation
+
+**IMPORTANT:** Use "host_1" and "host_2" as speaker values in every chunk. Alternate speakers naturally for engaging dialogue.
+"""
+
+
 def build_enhancement_prompt(
     transcript: str,
     structure: Dict[str, Any],
-    feedback: Optional[str] = None
+    feedback: Optional[str] = None,
+    conversational_style: bool = False
 ) -> str:
     """
     Build the enhancement prompt with dynamic duration targets.
@@ -106,6 +142,11 @@ def build_enhancement_prompt(
 
 Please revise the script to address the feedback above while maintaining engagement.
 """
+
+    # Add conversational style guidelines if enabled
+    conversational_section = ""
+    if conversational_style:
+        conversational_section = CONVERSATIONAL_STYLE_GUIDELINES
 
     return f"""You are an expert podcast script enhancer. Your job is to transform a raw transcript into an engaging, emotionally compelling podcast script.
 
@@ -183,7 +224,7 @@ Please revise the script to address the feedback above while maintaining engagem
 - The hook should pose a question or mystery that the episode answers
 - Vary tension levels across modules (don't stay at one level)
 - **WORD COUNT CHECK**: Hook ~{hook_words} words, each module ~{words_per_module} words, total ~{total_words} words
-
+{conversational_section}
 {feedback_section}
 
 ## Raw Transcript to Enhance:
@@ -217,16 +258,18 @@ class ScriptDesignerAgent(BaseAgent):
 
     def __init__(
         self,
-        model: str = "claude-opus-4-5-20250514",
+        model: str = None,
         speaker_format: Optional[str] = None
     ):
         """
         Initialize the Script Designer Agent.
 
         Args:
-            model: LLM model to use (default: claude-opus-4-5-20250514)
+            model: LLM model to use (default: opus from config)
             speaker_format: Speaker format hint (single, interview, co_hosts, narrator_characters)
         """
+        if model is None:
+            model = MODEL_OPTIONS["opus"]
         super().__init__(
             name="ScriptDesigner",
             output_category="",  # Root Output directory
@@ -238,7 +281,8 @@ class ScriptDesignerAgent(BaseAgent):
         self,
         transcript: str,
         feedback: Optional[str] = None,
-        target_duration_minutes: Optional[int] = None
+        target_duration_minutes: Optional[int] = None,
+        conversational_style: bool = False
     ) -> Dict[str, Any]:
         """
         Enhance a raw transcript into a structured, engaging script.
@@ -247,6 +291,8 @@ class ScriptDesignerAgent(BaseAgent):
             transcript: Raw transcript text
             feedback: Optional feedback from director for revision
             target_duration_minutes: Target podcast duration (defaults to 10 minutes)
+            conversational_style: Enable conversational style with cliffhangers,
+                                  suspense, and dramatic reveals (co-hosts format)
 
         Returns:
             Enhanced script as dictionary with modules, emotions, and metadata
@@ -257,12 +303,15 @@ class ScriptDesignerAgent(BaseAgent):
         # Calculate script structure based on duration
         structure = calculate_script_structure(duration)
         self.log(f"Target duration: {duration} min -> {structure['num_modules']} modules, {structure['total_words']} words")
+        if conversational_style:
+            self.log("Conversational style enabled: using co-hosts format with dramatic pacing")
 
         # Build the dynamic prompt
         prompt = build_enhancement_prompt(
             transcript=transcript,
             structure=structure,
-            feedback=feedback
+            feedback=feedback,
+            conversational_style=conversational_style
         )
 
         self.log("Enhancing transcript...")
@@ -273,6 +322,7 @@ class ScriptDesignerAgent(BaseAgent):
             # Store target duration in script for downstream use
             enhanced_script["target_duration_minutes"] = duration
             enhanced_script["script_structure"] = structure
+            enhanced_script["conversational_style"] = conversational_style
             self.log("Script enhancement complete")
             return enhanced_script
         except ValueError as e:
@@ -286,7 +336,8 @@ class ScriptDesignerAgent(BaseAgent):
         self,
         transcript: str,
         feedback: Optional[str] = None,
-        target_duration_minutes: Optional[int] = None
+        target_duration_minutes: Optional[int] = None,
+        conversational_style: bool = False
     ) -> Dict[str, Any]:
         """
         Main processing method - alias for enhance().
@@ -295,11 +346,12 @@ class ScriptDesignerAgent(BaseAgent):
             transcript: Raw transcript text
             feedback: Optional feedback from director
             target_duration_minutes: Target podcast duration
+            conversational_style: Enable conversational style
 
         Returns:
             Enhanced script dictionary
         """
-        return self.enhance(transcript, feedback, target_duration_minutes)
+        return self.enhance(transcript, feedback, target_duration_minutes, conversational_style)
 
     def save_enhanced_script(self, script: Dict[str, Any], filename: str = "enhanced_script") -> str:
         """

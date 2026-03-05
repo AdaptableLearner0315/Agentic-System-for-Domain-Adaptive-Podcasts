@@ -23,6 +23,8 @@ from ..models.interactive import (
     SessionInfo,
 )
 from ..logging_config import get_logger
+from ..config import get_settings
+from .memory_service import get_memory_service
 
 logger = get_logger("conversation_service")
 
@@ -30,7 +32,7 @@ logger = get_logger("conversation_service")
 SESSION_ID_LENGTH = 8
 
 # Claude model for conversations (Sonnet for speed)
-CONVERSATION_MODEL = "claude-sonnet-4-20250514"
+CONVERSATION_MODEL = "claude-sonnet-4-6"
 
 # Maximum messages to keep in context
 MAX_CONTEXT_MESSAGES = 20
@@ -52,6 +54,7 @@ class SessionState:
         script_context: Podcast script for context
         voice_id: Voice ID used in podcast (for TTS responses)
         is_active: Whether session is still active
+        user_id: Optional user ID for memory personalization
     """
     id: str
     job_id: str
@@ -60,6 +63,7 @@ class SessionState:
     script_context: Optional[str] = None
     voice_id: Optional[str] = None
     is_active: bool = True
+    user_id: Optional[str] = None
 
 
 class ConversationService:
@@ -76,18 +80,38 @@ class ConversationService:
         _client: Anthropic client for streaming
     """
 
-    def __init__(self):
-        """Initialize the conversation service."""
+    def __init__(self, api_key: Optional[str] = None):
+        """Initialize the conversation service.
+
+        Args:
+            api_key: Anthropic API key. Uses settings if not provided.
+        """
         self._sessions: Dict[str, SessionState] = {}
         self._job_sessions: Dict[str, str] = {}
         self._lock = threading.RLock()
-        self._client = AsyncAnthropic(timeout=120.0)
+
+        # Get API key from parameter or settings
+        settings = get_settings()
+        actual_api_key = api_key or settings.anthropic_api_key
+
+        if not actual_api_key:
+            logger.warning(
+                "No Anthropic API key configured. "
+                "Interactive chat will not work until ANTHROPIC_API_KEY is set."
+            )
+            self._client = None
+        else:
+            self._client = AsyncAnthropic(
+                api_key=actual_api_key,
+                timeout=120.0
+            )
 
     async def start_session(
         self,
         job_id: str,
         script: Optional[Dict] = None,
         voice_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> SessionResponse:
         """
         Start a new interactive session for a podcast.
@@ -96,6 +120,7 @@ class ConversationService:
             job_id: Podcast job ID for context.
             script: Enhanced script data (if available).
             voice_id: Voice ID from podcast (for TTS responses).
+            user_id: Optional user ID for memory personalization.
 
         Returns:
             SessionResponse with session details and welcome message.
@@ -129,6 +154,7 @@ class ConversationService:
             script_context=script_context,
             voice_id=voice_id,
             is_active=True,
+            user_id=user_id,
         )
 
         # Create welcome message
@@ -196,6 +222,22 @@ class ConversationService:
         response_id = str(uuid.uuid4())[:SESSION_ID_LENGTH]
         full_response = ""
 
+        # Check if client is available
+        if self._client is None:
+            error_text = "Chat is unavailable. Please check API key configuration."
+            logger.error("Anthropic client not initialized - API key missing")
+            yield error_text
+            # Create and store error message
+            assistant_message = ChatMessage(
+                id=response_id,
+                role=MessageRole.ASSISTANT,
+                content=error_text,
+                timestamp=datetime.utcnow(),
+            )
+            with self._lock:
+                session.messages.append(assistant_message)
+            return
+
         try:
             # Stream response from Claude
             async with self._client.messages.stream(
@@ -209,7 +251,13 @@ class ConversationService:
                     yield text
 
         except Exception as e:
-            logger.error("Error streaming response for session %s: %s", session_id, e)
+            logger.error(
+                "Error streaming response for session %s: %s: %s",
+                session_id,
+                type(e).__name__,
+                str(e),
+                exc_info=True
+            )
             error_text = "I apologize, but I encountered an error. Please try again."
             full_response = error_text
             yield error_text
@@ -484,7 +532,7 @@ class ConversationService:
 
     def _build_system_prompt(self, session: SessionState) -> str:
         """
-        Build the system prompt with podcast context.
+        Build the system prompt with podcast context and user memory.
 
         Args:
             session: Session state.
@@ -492,29 +540,48 @@ class ConversationService:
         Returns:
             System prompt for Claude.
         """
-        base_prompt = """You are an AI assistant discussing a podcast with the listener.
+        base_prompt = """You are Nell, a warm and knowledgeable AI assistant discussing podcasts.
 You have full knowledge of the podcast content and can answer questions,
 provide clarifications, and engage in deeper discussions about the topics covered.
 
 Guidelines:
-- Be conversational and friendly, matching the podcast's narrator style
+- Be conversational and friendly, like talking to a thoughtful friend
 - Reference specific parts of the podcast when relevant
 - Provide additional context or explanations when asked
 - Keep responses concise but informative (2-4 sentences typically)
 - If asked about something not in the podcast, acknowledge it and provide general knowledge
-- Encourage exploration of the topics"""
+- Encourage exploration of the topics
+- If the user interrupts you, adapt gracefully and listen to what they want to say"""
 
+        prompt_parts = [base_prompt]
+
+        # Add user memory context if available
+        if session.user_id:
+            try:
+                memory_service = get_memory_service()
+                memory_prompt = memory_service.build_memory_prompt(session.user_id)
+                if memory_prompt:
+                    prompt_parts.append(f"""
+=== ABOUT THIS USER ===
+{memory_prompt}
+
+Use this context to personalize your responses. Reference past conversations
+naturally when relevant (e.g., "You mentioned before..." or "Since you're interested in...").
+=== END USER CONTEXT ===""")
+            except Exception as e:
+                logger.warning("Failed to load user memory: %s", str(e))
+
+        # Add podcast content
         if session.script_context:
-            return f"""{base_prompt}
-
+            prompt_parts.append(f"""
 === PODCAST CONTENT ===
 {session.script_context}
 === END PODCAST CONTENT ===
 
 Use the podcast content above to inform your responses.
-When referencing specific sections, you can mention them naturally in conversation."""
+When referencing specific sections, you can mention them naturally in conversation.""")
 
-        return base_prompt
+        return "\n".join(prompt_parts)
 
     def _build_claude_messages(self, session: SessionState) -> List[Dict]:
         """

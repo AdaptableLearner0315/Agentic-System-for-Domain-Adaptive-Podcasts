@@ -60,14 +60,61 @@ MODE_CONFIGS: Dict[str, Dict[str, Any]] = {
 
     "pro": {
         "name": "Pro Mode",
-        "description": "High-quality generation with full customization (5-8 minutes)",
+        "description": "Balanced quality and speed (2-3 minutes)",
+        "target_time_seconds": 180,
+
+        # Script enhancement settings
+        "script": {
+            "director_review": False,  # Skip review loop for faster generation
+            "max_review_rounds": 0,
+            "model": "opus",  # Best model for quality
+        },
+
+        # TTS settings
+        "tts": {
+            "granularity": "sentence",  # Generate per-sentence for precision
+            "parallel_workers": 5,  # Reduced from 10 to avoid rate limits
+            "apply_voice_styles": True,  # Basic voice styling
+            "use_asset_library": False,
+        },
+
+        # BGM settings
+        "bgm": {
+            "segments": 5,  # Reduced from 9 for speed
+            "daisy_chain": False,  # Parallel for speed
+            "parallel": True,
+            "use_stems": False,
+        },
+
+        # Image settings
+        "images": {
+            "count": 8,  # Reduced from 16 for speed
+            "use_library": False,
+            "parallel_workers": 4,  # Reduced from 8 to avoid rate limits
+            "generate_custom": 8,
+        },
+
+        # Assembly settings
+        "assembly": {
+            "fast_mix": False,
+            "vad_ducking": False,  # Simple ducking for speed
+            "crossfade_ms": 1000,
+            "video_ken_burns": True,
+            "video_fps": 24,
+            "video_quality": "quality",
+        },
+    },
+
+    "ultra": {
+        "name": "Ultra Mode",
+        "description": "Premium quality with director review (5-8 minutes)",
         "target_time_seconds": 420,
 
         # Script enhancement settings
         "script": {
-            "director_review": True,
+            "director_review": True,  # Full 3-round director review
             "max_review_rounds": 3,
-            "model": "opus",  # Best model for quality
+            "model": "opus",
         },
 
         # TTS settings
@@ -180,18 +227,20 @@ def calculate_bgm_segments(duration_minutes: int, mode: str = "normal") -> int:
     Calculate the number of BGM segments based on duration and mode.
 
     Normal mode: 2-4 segments (simpler)
-    Pro mode: 4-9 segments (richer soundscape)
+    Pro mode: 3-5 segments (balanced)
+    Ultra mode: 4-9 segments (richer soundscape)
 
     Args:
         duration_minutes: Target podcast duration in minutes
-        mode: Pipeline mode ('normal' or 'pro')
+        mode: Pipeline mode ('normal', 'pro', or 'ultra')
 
     Returns:
         Number of BGM segments to generate
     """
     duration_minutes = max(1, min(30, duration_minutes))
+    mode_lower = mode.lower()
 
-    if mode.lower() == "normal":
+    if mode_lower == "normal":
         # Normal mode: simpler BGM structure
         if duration_minutes <= 3:
             return 2  # Intro + outro
@@ -201,8 +250,18 @@ def calculate_bgm_segments(duration_minutes: int, mode: str = "normal") -> int:
             return 4  # Intro + 2 mains + outro
         else:
             return 5  # Intro + 3 mains + outro
+    elif mode_lower == "pro":
+        # Pro mode: balanced BGM (reduced from ultra)
+        if duration_minutes <= 3:
+            return 3
+        elif duration_minutes <= 7:
+            return 4
+        elif duration_minutes <= 15:
+            return 5
+        else:
+            return 5  # Cap at 5 for Pro
     else:
-        # Pro mode: richer BGM with more variety
+        # Ultra mode: richer BGM with more variety
         if duration_minutes <= 3:
             return 4
         elif duration_minutes <= 7:
@@ -221,24 +280,30 @@ def calculate_image_count(duration_minutes: int, mode: str = "normal") -> int:
 
     Roughly 1 image per 30-60 seconds of content.
 
-    Normal mode: 2-8 images (faster generation)
-    Pro mode: 4-16 images (richer visuals)
+    Normal mode: 2-4 images (faster generation)
+    Pro mode: 4-8 images (balanced)
+    Ultra mode: 4-16 images (richer visuals)
 
     Args:
         duration_minutes: Target podcast duration in minutes
-        mode: Pipeline mode ('normal' or 'pro')
+        mode: Pipeline mode ('normal', 'pro', or 'ultra')
 
     Returns:
         Number of images to generate
     """
     duration_minutes = max(1, min(30, duration_minutes))
+    mode_lower = mode.lower()
 
-    if mode.lower() == "normal":
-        # Normal mode: ~1 image per minute, min 2, max 8
-        count = max(2, min(8, duration_minutes))
+    if mode_lower == "normal":
+        # Normal mode: ~0.5 images per minute, min 2, max 4
+        count = max(2, min(4, duration_minutes))
+        return count
+    elif mode_lower == "pro":
+        # Pro mode: ~1 image per minute, min 4, max 8
+        count = max(4, min(8, duration_minutes))
         return count
     else:
-        # Pro mode: ~1.5 images per minute, min 4, max 16
+        # Ultra mode: ~1.5 images per minute, min 4, max 16
         count = max(4, min(16, int(duration_minutes * 1.5)))
         return count
 

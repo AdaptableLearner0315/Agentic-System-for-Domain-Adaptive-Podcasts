@@ -20,6 +20,7 @@ from ..models.responses import (
     ProgressResponse,
     ResultResponse,
     ErrorResponse,
+    JobLogsResponse,
 )
 from ..models.enums import JobStatus, PipelineMode
 from ..dependencies import get_job_manager, get_pipeline_service, get_file_service
@@ -145,6 +146,40 @@ async def get_job_status(
 
     progress = job_manager.get_progress(job_id)
     return progress
+
+
+@router.get(
+    "/{job_id}/logs",
+    response_model=JobLogsResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Job not found"},
+    },
+    summary="Get job logs",
+    description="Get execution logs for a job (works for any status).",
+)
+async def get_job_logs(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> JobLogsResponse:
+    """
+    Get execution logs for a job.
+
+    Works for jobs in any status (pending, running, completed, failed, cancelled).
+
+    Args:
+        job_id: Unique job identifier.
+        job_manager: Job management service.
+
+    Returns:
+        JobLogsResponse with execution logs.
+
+    Raises:
+        HTTPException: If job is not found.
+    """
+    logs = job_manager.get_job_logs(job_id)
+    if not logs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    return logs
 
 
 @router.get(

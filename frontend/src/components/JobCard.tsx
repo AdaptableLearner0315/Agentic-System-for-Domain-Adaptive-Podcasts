@@ -6,6 +6,9 @@ import Image from 'next/image'
 import type { JobResponse, JobStatus } from '@/types'
 import { API_URL } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
+import { FloatingChatPopup } from '@/components/FloatingChatPopup'
+import { ChatPanel } from '@/components/interactive/ChatPanel'
+import { LogsModal } from '@/components/LogsModal'
 
 interface JobCardProps {
   job: JobResponse
@@ -118,16 +121,20 @@ function GenreBadge({ genre }: { genre: string }) {
 export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
 
   const handleView = () => {
     router.push(`/jobs/${job.id}`)
   }
 
-  const handleReuse = () => {
+  const handleReuse = (e: React.MouseEvent) => {
+    e.stopPropagation()
     onReuse(job)
   }
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation()
     if (isDeleting) return
     setIsDeleting(true)
     try {
@@ -137,12 +144,35 @@ export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
     }
   }
 
+  const handleChat = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsChatOpen(true)
+  }
+
+  const handleLogs = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowLogs(true)
+  }
+
+  const handleCardClick = () => {
+    if (job.status === 'completed') {
+      handleView()
+    } else {
+      // Open logs modal for running/failed/pending/cancelled jobs
+      setShowLogs(true)
+    }
+  }
+
   const canView = job.status === 'completed'
+  const isClickable = true  // All cards are now clickable
   const duration = job.result?.duration_seconds
   const thumbnailUrl = getThumbnailUrl(job)
 
   return (
-    <div className="card hover:border-border/80 transition-colors">
+    <div
+      className={`card hover:border-border/80 transition-colors ${isClickable ? 'cursor-pointer' : ''}`}
+      onClick={handleCardClick}
+    >
       <div className="flex items-start gap-4">
         {/* Thumbnail */}
         {thumbnailUrl ? (
@@ -203,17 +233,40 @@ export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
         <div className="flex items-center gap-2 flex-shrink-0">
           {canView && (
             <button
-              onClick={handleView}
+              onClick={(e) => { e.stopPropagation(); handleView(); }}
               className="btn-secondary text-sm py-1.5 px-3"
             >
               View
             </button>
           )}
+          {canView && (
+            <button
+              onClick={handleChat}
+              className="btn-secondary text-sm py-1.5 px-3"
+            >
+              Chat
+            </button>
+          )}
+          <button
+            onClick={handleLogs}
+            className="btn-secondary text-sm py-1.5 px-3 flex items-center gap-1.5"
+            title="View execution logs"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            Logs
+          </button>
           <button
             onClick={handleReuse}
             className="btn-secondary text-sm py-1.5 px-3"
           >
-            Reuse
+            OG Prompt
           </button>
           <button
             onClick={handleDelete}
@@ -260,6 +313,21 @@ export function JobCard({ job, onDelete, onReuse }: JobCardProps) {
           </button>
         </div>
       </div>
+
+      {/* Floating Chat Popup */}
+      <FloatingChatPopup isOpen={isChatOpen} onClose={() => setIsChatOpen(false)}>
+        <ChatPanel
+          jobId={job.id}
+          isVisible={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          enableVoice={true}
+        />
+      </FloatingChatPopup>
+
+      {/* Logs Modal */}
+      {showLogs && (
+        <LogsModal jobId={job.id} onClose={() => setShowLogs(false)} />
+      )}
     </div>
   )
 }

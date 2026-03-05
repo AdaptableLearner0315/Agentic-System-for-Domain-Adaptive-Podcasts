@@ -31,19 +31,13 @@ export function PromptInput({
   return (
     <div className="relative">
       <textarea
-        className="w-full min-h-[140px] rounded-lg border border-border bg-transparent px-4 py-3 text-sm placeholder:text-muted-foreground resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full min-h-[140px] rounded-lg border border-border bg-transparent px-4 pt-3 pb-10 text-sm placeholder:text-muted-foreground resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         rows={5}
       />
-      {/* Character count */}
-      {value.length > 0 && (
-        <div className="absolute bottom-3 right-3 text-xs text-muted-foreground">
-          {value.length} chars
-        </div>
-      )}
     </div>
   )
 }

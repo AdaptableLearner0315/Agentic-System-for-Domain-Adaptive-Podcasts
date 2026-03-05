@@ -103,6 +103,7 @@ def cmd_enhance(args):
     """
     from agents.script_enhancer import ScriptEnhancer
     from agents.director import Director
+    from config.llm import MODEL_OPTIONS
 
     # Resolve input path
     input_path = Path(args.input)
@@ -130,12 +131,8 @@ def cmd_enhance(args):
         transcript = f.read()
     print(f"Transcript length: {len(transcript)} characters")
 
-    # Determine model
-    model_map = {
-        "sonnet": "claude-sonnet-4-20250514",
-        "opus": "claude-opus-4-20250514"
-    }
-    model_id = model_map.get(args.model, model_map["sonnet"])
+    # Determine model using centralized config
+    model_id = MODEL_OPTIONS.get(args.model, MODEL_OPTIONS["sonnet"])
 
     print(f"\n{'='*60}")
     print(f"Script Enhancement Pipeline")

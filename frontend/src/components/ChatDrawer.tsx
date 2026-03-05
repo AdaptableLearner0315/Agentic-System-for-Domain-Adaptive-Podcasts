@@ -9,7 +9,7 @@ interface ChatDrawerProps {
 }
 
 /**
- * Left-side sliding drawer with backdrop overlay.
+ * Right-side sliding drawer with backdrop overlay.
  *
  * Always mounted in DOM for smooth CSS transitions.
  * Locks body scroll when open.
@@ -41,10 +41,10 @@ export function ChatDrawer({ isOpen, onClose, children }: ChatDrawerProps) {
         onClick={onClose}
       />
 
-      {/* Drawer panel */}
+      {/* Drawer panel - slides from right */}
       <div
-        className={`fixed top-0 left-0 z-50 h-full w-full sm:w-[360px] bg-background border-r border-border shadow-xl transition-transform duration-300 ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed top-0 right-0 z-50 h-full w-full sm:w-[400px] bg-background border-l border-border shadow-xl transition-transform duration-300 ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         {children}

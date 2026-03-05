@@ -42,13 +42,17 @@ class GenerationRequest(BaseModel):
     )
     mode: str = Field(
         "normal",
-        description="Pipeline mode: 'normal' (fast) or 'pro' (quality)"
+        description="Pipeline mode: 'normal' (fast), 'pro' (balanced), or 'ultra' (premium)"
     )
     target_duration_minutes: Optional[int] = Field(
         None,
         ge=1,
         le=30,
         description="Target podcast duration in minutes. If not specified, extracted from prompt or defaults to 10."
+    )
+    conversational_style: bool = Field(
+        False,
+        description="Enable conversational style with cliffhangers, suspense, and dramatic reveals (for co-hosts format)"
     )
     config: Optional[Dict[str, Any]] = Field(
         None,
@@ -57,9 +61,9 @@ class GenerationRequest(BaseModel):
 
     @validator("mode")
     def validate_mode(cls, v: str) -> str:
-        """Validate that mode is either 'normal' or 'pro'."""
-        if v.lower() not in ("normal", "pro"):
-            raise ValueError("mode must be 'normal' or 'pro'")
+        """Validate that mode is 'normal', 'pro', or 'ultra'."""
+        if v.lower() not in ("normal", "pro", "ultra"):
+            raise ValueError("mode must be 'normal', 'pro', or 'ultra'")
         return v.lower()
 
     @validator("prompt", "file_ids")

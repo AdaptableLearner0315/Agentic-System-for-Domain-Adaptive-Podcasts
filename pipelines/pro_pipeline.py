@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 
 from config.modes import get_mode_config
+from config.llm import MODEL_OPTIONS
 from config.paths import OUTPUT_DIR, AUDIO_DIR, TTS_DIR, BGM_DIR, VISUALS_DIR, ensure_directories
 from utils.input_router import InputRouter, ExtractedContent
 from utils.parallel_executor import TTSParallelExecutor
@@ -29,39 +30,48 @@ from utils.progress_stream import ProgressStream, GenerationPhase
 
 @dataclass
 class ProConfig:
-    """Configuration for Pro pipeline customization."""
+    """
+    Configuration for Pro pipeline customization.
+
+    Pro mode is optimized for balanced quality/speed (~2-3 min):
+    - No director review loop (1 enhancement pass)
+    - 8 images instead of 16
+    - 5 BGM segments instead of 9
+    - Simple ducking instead of VAD-based
+    """
     # Script settings
-    director_review: bool = True
-    max_review_rounds: int = 3
+    director_review: bool = False  # Skip review for speed
+    max_review_rounds: int = 0
     approval_threshold: int = 7
 
     # Voice settings
     voice_preset: str = "default"
-    apply_voice_styles: bool = True
+    apply_voice_styles: bool = True  # Basic voice styling
     custom_pronunciations: Dict[str, str] = field(default_factory=dict)
 
     # Music settings
     music_genre: str = "cinematic"
-    bgm_segments: int = 9
-    daisy_chain: bool = True
+    bgm_segments: int = 5  # Reduced from 9
+    daisy_chain: bool = False  # Parallel for speed
+    bgm_intelligent: bool = True  # Use Music Intelligence System for BGM
 
     # Image settings
-    image_count: int = 16
+    image_count: int = 8  # Reduced from 16
     image_style: str = "cinematic"
 
     # Quality settings
     tts_sentence_level: bool = True
-    vad_ducking: bool = True
+    vad_ducking: bool = False  # Simple ducking for speed
 
-    # NEW: Speaker settings
+    # Speaker settings
     speaker_format: str = "auto"  # auto, single, interview, co_hosts, narrator_characters
-    manual_speakers: Optional[Dict[str, str]] = None  # Manual speaker assignments per chunk
-    voice_overrides: Optional[Dict[str, str]] = None  # Voice overrides per speaker role
+    manual_speakers: Optional[Dict[str, str]] = None
+    voice_overrides: Optional[Dict[str, str]] = None
 
-    # NEW: Emotion settings
-    emotion_voice_sync: bool = True  # Sync voice parameters with chunk emotion
-    emotion_image_alignment: bool = True  # Align image prompts with chunk emotion
-    emotion_validation: bool = True  # Validate emotion consistency
+    # Emotion settings
+    emotion_voice_sync: bool = True
+    emotion_image_alignment: bool = True
+    emotion_validation: bool = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ProConfig':
@@ -80,15 +90,91 @@ class ProConfig:
             'music_genre': self.music_genre,
             'bgm_segments': self.bgm_segments,
             'daisy_chain': self.daisy_chain,
+            'bgm_intelligent': self.bgm_intelligent,
             'image_count': self.image_count,
             'image_style': self.image_style,
             'tts_sentence_level': self.tts_sentence_level,
             'vad_ducking': self.vad_ducking,
-            # Speaker settings
             'speaker_format': self.speaker_format,
             'manual_speakers': self.manual_speakers,
             'voice_overrides': self.voice_overrides,
-            # Emotion settings
+            'emotion_voice_sync': self.emotion_voice_sync,
+            'emotion_image_alignment': self.emotion_image_alignment,
+            'emotion_validation': self.emotion_validation,
+        }
+
+
+@dataclass
+class UltraConfig:
+    """
+    Configuration for Ultra pipeline customization.
+
+    Ultra mode provides premium quality (~5-8 min):
+    - Full 3-round director review loop
+    - 16 narrative images with emotion alignment
+    - 9-segment daisy-chain BGM
+    - VAD-based ducking
+    - Full voice styling
+    """
+    # Script settings
+    director_review: bool = True  # Full review loop
+    max_review_rounds: int = 3
+    approval_threshold: int = 7
+
+    # Voice settings
+    voice_preset: str = "default"
+    apply_voice_styles: bool = True  # Full 5-persona voice styling
+    custom_pronunciations: Dict[str, str] = field(default_factory=dict)
+
+    # Music settings
+    music_genre: str = "cinematic"
+    bgm_segments: int = 9  # Full daisy-chain
+    daisy_chain: bool = True
+    bgm_intelligent: bool = True
+
+    # Image settings
+    image_count: int = 16  # Full 16 narrative images
+    image_style: str = "cinematic"
+
+    # Quality settings
+    tts_sentence_level: bool = True
+    vad_ducking: bool = True  # Full VAD-based ducking
+
+    # Speaker settings
+    speaker_format: str = "auto"
+    manual_speakers: Optional[Dict[str, str]] = None
+    voice_overrides: Optional[Dict[str, str]] = None
+
+    # Emotion settings
+    emotion_voice_sync: bool = True
+    emotion_image_alignment: bool = True
+    emotion_validation: bool = True
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'UltraConfig':
+        """Create config from dictionary."""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert config to dictionary."""
+        return {
+            'director_review': self.director_review,
+            'max_review_rounds': self.max_review_rounds,
+            'approval_threshold': self.approval_threshold,
+            'voice_preset': self.voice_preset,
+            'apply_voice_styles': self.apply_voice_styles,
+            'custom_pronunciations': self.custom_pronunciations,
+            'music_genre': self.music_genre,
+            'bgm_segments': self.bgm_segments,
+            'daisy_chain': self.daisy_chain,
+            'bgm_intelligent': self.bgm_intelligent,
+            'image_count': self.image_count,
+            'image_style': self.image_style,
+            'tts_sentence_level': self.tts_sentence_level,
+            'vad_ducking': self.vad_ducking,
+            'speaker_format': self.speaker_format,
+            'manual_speakers': self.manual_speakers,
+            'voice_overrides': self.voice_overrides,
             'emotion_voice_sync': self.emotion_voice_sync,
             'emotion_image_alignment': self.emotion_image_alignment,
             'emotion_validation': self.emotion_validation,
@@ -167,7 +253,9 @@ class ProPipeline:
         import time
         start_time = time.time()
 
+        # Set Pro mode first so duration hints are correct
         if progress:
+            progress.set_mode("pro")
             progress.start("Starting high-quality generation...")
 
         try:
@@ -224,7 +312,9 @@ class ProPipeline:
         import time
         start_time = time.time()
 
+        # Set Pro mode first so duration hints are correct
         if progress:
+            progress.set_mode("pro")
             progress.start("Starting high-quality generation...")
 
         print(f"[ProPipeline] Using pre-processed content: {len(content.text)} characters from {content.source_type}")
@@ -266,7 +356,7 @@ class ProPipeline:
         try:
             # Stage 2: Script enhancement with Director review
             if progress:
-                progress.scripting("Enhancing script with Director review...")
+                progress.scripting("Starting script enhancement...")
 
             script, review_history = await self._enhance_script_with_review(
                 content, progress
@@ -279,18 +369,21 @@ class ProPipeline:
                 except Exception as e:
                     print(f"[ProPipeline] on_script_ready callback failed: {e}")
 
-            # Stage 2.5: Emotion validation + Speaker assignment IN PARALLEL
+            # Stage 2.5: Emotion validation + Speaker assignment
             # Both are independent reads of the script; emotion fixes are applied
             # first, then speaker assignment runs on the fixed script.
             if self.config.emotion_validation:
                 if progress:
-                    progress.scripting("Validating emotions...")
+                    progress.validating("emotions", "Validating emotions...")
                 script = await self._validate_and_fix_emotions(script, progress)
 
             if self.config.speaker_format != "single":
                 if progress:
-                    progress.scripting("Assigning speakers...")
+                    progress.validating("speakers", "Assigning speakers...")
                 script = await self._assign_speakers(script, progress)
+
+            if progress:
+                progress.validating("complete", "Validation complete")
 
             # Stage 3+4+5: Generate TTS + BGM + Images IN PARALLEL
             if progress:
@@ -302,17 +395,30 @@ class ProPipeline:
             tts_task = asyncio.create_task(
                 self._generate_tts_sentence_level(script, progress)
             )
-            bgm_task = asyncio.create_task(
-                self._generate_bgm_daisy_chain(script, progress)
-            )
+
+            # Use intelligent BGM generation if enabled, otherwise fall back to daisy chain
+            if self.config.bgm_intelligent:
+                bgm_task = asyncio.create_task(
+                    self._generate_bgm_intelligent(script, progress)
+                )
+            else:
+                bgm_task = asyncio.create_task(
+                    self._generate_bgm_daisy_chain(script, progress)
+                )
+
             image_task = asyncio.create_task(
                 self._generate_images_parallel(script, progress)
             )
 
-            # Wait for all three to complete
-            tts_results, bgm_results, image_results = await asyncio.gather(
-                tts_task, bgm_task, image_task
+            # Wait for all three to complete - use return_exceptions=True to prevent
+            # cascade failures where one task failing cancels all others
+            results = await asyncio.gather(
+                tts_task, bgm_task, image_task,
+                return_exceptions=True
             )
+
+            # Handle results with graceful degradation
+            tts_results, bgm_results, image_results = self._handle_parallel_results(results)
 
             # Stage 6: Apply voice styles (with emotion modifiers)
             if self.config.apply_voice_styles:
@@ -376,6 +482,68 @@ class ProPipeline:
                 config_used=self.config,
                 error=str(e),
             )
+
+    def _handle_parallel_results(
+        self,
+        results: tuple
+    ) -> tuple:
+        """
+        Handle results from asyncio.gather with return_exceptions=True.
+
+        Provides graceful degradation when some tasks fail - the pipeline
+        continues with partial results rather than failing completely.
+
+        Args:
+            results: Tuple of (tts_result, bgm_result, image_result)
+                     Each can be a list of results or an Exception.
+
+        Returns:
+            Tuple of (tts_results, bgm_results, image_results) with
+            empty lists for failed tasks.
+        """
+        tts_raw, bgm_raw, image_raw = results
+
+        # Handle TTS results
+        if isinstance(tts_raw, Exception):
+            print(f"[ProPipeline] TTS generation failed: {tts_raw}")
+            tts_results = []
+        else:
+            tts_results = tts_raw or []
+            # Count successful TTS items
+            success_count = sum(1 for r in tts_results if r.get('path'))
+            print(f"[ProPipeline] TTS: {success_count}/{len(tts_results)} successful")
+
+        # Handle BGM results
+        if isinstance(bgm_raw, Exception):
+            print(f"[ProPipeline] BGM generation failed: {bgm_raw}")
+            bgm_results = []
+        else:
+            bgm_results = bgm_raw or []
+            success_count = sum(1 for r in bgm_results if r.get('path'))
+            print(f"[ProPipeline] BGM: {success_count}/{len(bgm_results)} successful")
+
+        # Handle Image results
+        if isinstance(image_raw, Exception):
+            print(f"[ProPipeline] Image generation failed: {image_raw}")
+            image_results = []
+        else:
+            image_results = image_raw or []
+            success_count = sum(1 for r in image_results if r.get('path'))
+            print(f"[ProPipeline] Images: {success_count}/{len(image_results)} successful")
+
+        # Check if we have minimum viable results
+        tts_success = [r for r in tts_results if r.get('path')]
+        if not tts_success:
+            raise Exception("TTS generation completely failed - cannot create podcast without voice")
+
+        # BGM and images are optional - we can continue without them
+        if not bgm_results or not any(r.get('path') for r in bgm_results):
+            print("[ProPipeline] Warning: No BGM available, proceeding with voice-only")
+
+        if not image_results or not any(r.get('path') for r in image_results):
+            print("[ProPipeline] Warning: No images available, will create audio-only output")
+
+        return tts_results, bgm_results, image_results
 
     async def _validate_and_fix_emotions(
         self,
@@ -457,7 +625,7 @@ class ProPipeline:
         from agents.director_agent import DirectorAgent
 
         # Use opus for highest quality
-        model_id = "claude-opus-4-5-20250514"
+        model_id = MODEL_OPTIONS["opus"]
 
         enhancer = ScriptDesignerAgent(model=model_id)
         director = DirectorAgent(model=model_id)
@@ -466,32 +634,47 @@ class ProPipeline:
 
         # Get target duration from content metadata (set by SmartInputHandler)
         target_duration = content.metadata.get("target_duration_minutes")
+        # Get conversational style flag (set by PipelineService)
+        conversational_style = content.metadata.get("conversational_style", False)
 
         review_history = []
         feedback = None
         script = None
         approved = False
         round_num = 0
+        max_rounds = self.config.max_review_rounds
 
-        while not approved and round_num < self.config.max_review_rounds:
+        while not approved and round_num < max_rounds:
             round_num += 1
 
+            # Report enhancing sub-step
             if progress:
-                progress.scripting(f"Enhancement round {round_num}/{self.config.max_review_rounds}...")
+                progress.director_review(
+                    round_num, max_rounds, "enhancing",
+                    f"Round {round_num}/{max_rounds}: Enhancing script..."
+                )
 
-            # Enhance script with target duration
+            # Enhance script with target duration and conversational style
             script = await loop.run_in_executor(
                 None,
                 lambda fb=feedback: enhancer.enhance(
                     content.text,
                     feedback=fb,
-                    target_duration_minutes=target_duration
+                    target_duration_minutes=target_duration,
+                    conversational_style=conversational_style
                 )
             )
 
             if not self.config.director_review:
                 # Skip review if disabled
                 break
+
+            # Report reviewing sub-step
+            if progress:
+                progress.director_review(
+                    round_num, max_rounds, "reviewing",
+                    f"Round {round_num}/{max_rounds}: Director reviewing..."
+                )
 
             # Review script
             review = await loop.run_in_executor(
@@ -510,7 +693,10 @@ class ProPipeline:
             if review.get("approved") or review.get("score", 0) >= self.config.approval_threshold:
                 approved = True
                 if progress:
-                    progress.scripting(f"Script approved! Score: {review.get('score')}/10")
+                    progress.director_review(
+                        round_num, max_rounds, "approved",
+                        f"Script approved! Score: {review.get('score')}/10"
+                    )
             else:
                 feedback = review.get("feedback", "")
 
@@ -668,6 +854,56 @@ class ProPipeline:
 
         return results
 
+    async def _generate_bgm_intelligent(
+        self,
+        script: Dict[str, Any],
+        progress: Optional[ProgressStream] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate BGM using Music Intelligence System (Pro mode).
+
+        Uses emotion timeline extraction and dynamic stem composition
+        for emotionally responsive background music.
+
+        Args:
+            script: Enhanced script with emotion annotations
+            progress: Optional progress stream for updates
+
+        Returns:
+            List of BGM segment dictionaries in expected mixer format
+        """
+        try:
+            from agents.music_intelligence import MusicIntelligence
+
+            if progress:
+                progress.generating_bgm(1, 2, "Extracting emotion timeline...")
+
+            mi = MusicIntelligence(mode="pro")
+            timeline = mi.extract_emotion_timeline(script)
+
+            if progress:
+                progress.generating_bgm(2, 2, "Composing intelligent BGM...")
+
+            bgm_path = mi.compose_for_pro(timeline)
+
+            if bgm_path and Path(bgm_path).exists():
+                print(f"[ProPipeline] Music Intelligence generated BGM: {bgm_path}")
+                # Return in expected format for the mixer
+                return [{
+                    "segment_id": 1,
+                    "name": "intelligent_bgm",
+                    "path": bgm_path,
+                    "phase": "full"
+                }]
+            else:
+                print("[ProPipeline] Music Intelligence returned invalid path, falling back")
+
+        except Exception as e:
+            print(f"[ProPipeline] Music Intelligence failed: {e}, falling back to daisy chain")
+
+        # Fallback to daisy chain
+        return await self._generate_bgm_daisy_chain(script, progress)
+
     async def _generate_images_parallel(
         self,
         script: Dict[str, Any],
@@ -742,8 +978,28 @@ class ProPipeline:
         tts_results: List[Dict[str, Any]],
         bgm_results: List[Dict[str, Any]]
     ) -> str:
-        """Mix audio with VAD-based ducking."""
+        """
+        Mix audio with VAD-based ducking.
+
+        Filters out failed TTS/BGM items before mixing to handle
+        partial failures gracefully.
+        """
         from agents.audio_designer.audio_mixer import AudioMixer
+
+        # Filter out failed TTS items (no path = failed generation)
+        valid_tts = [r for r in tts_results if r.get('path')]
+        failed_tts = len(tts_results) - len(valid_tts)
+        if failed_tts > 0:
+            print(f"[ProPipeline] Filtering {failed_tts} failed TTS items from mix")
+
+        # Filter out failed BGM items
+        valid_bgm = [r for r in bgm_results if r.get('path')]
+        failed_bgm = len(bgm_results) - len(valid_bgm)
+        if failed_bgm > 0:
+            print(f"[ProPipeline] Filtering {failed_bgm} failed BGM items from mix")
+
+        if not valid_tts:
+            raise Exception("No valid TTS files available for mixing")
 
         mixer = AudioMixer()
 
@@ -751,8 +1007,8 @@ class ProPipeline:
         output_path = await loop.run_in_executor(
             None,
             lambda: mixer.mix_podcast_sentence_level(
-                tts_results,
-                bgm_results,
+                valid_tts,
+                valid_bgm,
                 output_filename="final_pro_mode"
             )
         )
@@ -822,4 +1078,4 @@ def run_pro_pipeline(
     return asyncio.run(pipeline.run(input_path, user_prompt, progress))
 
 
-__all__ = ['ProPipeline', 'ProConfig', 'ProPipelineResult', 'run_pro_pipeline']
+__all__ = ['ProPipeline', 'ProConfig', 'UltraConfig', 'ProPipelineResult', 'run_pro_pipeline']

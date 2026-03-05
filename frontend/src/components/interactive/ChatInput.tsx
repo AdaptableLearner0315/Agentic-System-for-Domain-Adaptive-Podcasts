@@ -1,22 +1,23 @@
 'use client'
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react'
+import { VoiceExperience } from '@/components/voice'
 
 interface ChatInputProps {
   /** Callback when message is submitted */
   onSend: (message: string) => void
   /** Whether input is disabled */
   disabled?: boolean
+  /** Whether the system is connecting (shows indicator on voice button) */
+  isConnecting?: boolean
   /** Placeholder text */
   placeholder?: string
   /** Whether to show voice input button */
   showVoiceInput?: boolean
-  /** Callback for voice input */
-  onVoiceStart?: () => void
-  /** Callback when voice input ends */
-  onVoiceEnd?: () => void
-  /** Whether voice is currently recording */
-  isRecording?: boolean
+  /** Job ID for voice transcription (required when showVoiceInput is true) */
+  jobId?: string
+  /** Callback when interaction starts (e.g., for pausing video) */
+  onInteraction?: () => void
 }
 
 /**
@@ -29,18 +30,17 @@ interface ChatInputProps {
  * @param disabled - Whether input is disabled
  * @param placeholder - Placeholder text
  * @param showVoiceInput - Whether to show voice input button
- * @param onVoiceStart - Callback when voice recording starts
- * @param onVoiceEnd - Callback when voice recording ends
- * @param isRecording - Whether voice is currently recording
+ * @param jobId - Job ID for voice transcription
+ * @param onInteraction - Callback when interaction starts
  */
 export function ChatInput({
   onSend,
   disabled = false,
+  isConnecting = false,
   placeholder = 'Type a message...',
   showVoiceInput = false,
-  onVoiceStart,
-  onVoiceEnd,
-  isRecording = false,
+  jobId,
+  onInteraction,
 }: ChatInputProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -87,15 +87,23 @@ export function ChatInput({
   }, [])
 
   /**
-   * Handle voice button interaction.
+   * Handle voice transcription - auto-send as message.
    */
-  const handleVoiceMouseDown = useCallback(() => {
-    onVoiceStart?.()
-  }, [onVoiceStart])
+  const handleVoiceTranscription = useCallback(
+    (transcribedText: string) => {
+      if (transcribedText.trim()) {
+        onSend(transcribedText.trim())
+      }
+    },
+    [onSend]
+  )
 
-  const handleVoiceMouseUp = useCallback(() => {
-    onVoiceEnd?.()
-  }, [onVoiceEnd])
+  /**
+   * Handle voice interaction start.
+   */
+  const handleVoiceInteraction = useCallback(() => {
+    onInteraction?.()
+  }, [onInteraction])
 
   return (
     <div className="flex items-end gap-2 p-3 border-t border-border bg-background">
@@ -113,46 +121,21 @@ export function ChatInput({
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          disabled={disabled || isRecording}
+          disabled={disabled}
           rows={1}
         />
       </div>
 
-      {/* Voice input button */}
-      {showVoiceInput && (
-        <button
-          className={`
-            w-11 h-11 rounded-full flex items-center justify-center
-            transition-all duration-150
-            ${isRecording
-              ? 'bg-destructive text-destructive-foreground scale-110 animate-pulse'
-              : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80'
-            }
-            disabled:opacity-50 disabled:cursor-not-allowed
-          `}
-          onMouseDown={handleVoiceMouseDown}
-          onMouseUp={handleVoiceMouseUp}
-          onMouseLeave={isRecording ? handleVoiceMouseUp : undefined}
-          onTouchStart={handleVoiceMouseDown}
-          onTouchEnd={handleVoiceMouseUp}
+      {/* Voice input button - tap-to-talk */}
+      {showVoiceInput && jobId && (
+        <VoiceExperience
+          jobId={jobId}
+          onSend={handleVoiceTranscription}
+          onInteraction={handleVoiceInteraction}
           disabled={disabled}
-          aria-label={isRecording ? 'Release to send' : 'Hold to record'}
-        >
-          {isRecording ? (
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="8" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-              />
-            </svg>
-          )}
-        </button>
+          isConnecting={isConnecting}
+          layout="compact"
+        />
       )}
 
       {/* Send button */}
@@ -164,7 +147,7 @@ export function ChatInput({
           disabled:opacity-50 disabled:cursor-not-allowed
         "
         onClick={handleSubmit}
-        disabled={disabled || !text.trim() || isRecording}
+        disabled={disabled || !text.trim()}
         aria-label="Send message"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -70,10 +70,20 @@ module.exports = {
           '0%': { transform: 'translateY(10px)', opacity: 0 },
           '100%': { transform: 'translateY(0)', opacity: 1 },
         },
+        'slide-out-up': {
+          '0%': { transform: 'translateY(0)', opacity: 1 },
+          '100%': { transform: 'translateY(-20px)', opacity: 0 },
+        },
+        'slide-in-up': {
+          '0%': { transform: 'translateY(20px)', opacity: 0 },
+          '100%': { transform: 'translateY(0)', opacity: 1 },
+        },
       },
       animation: {
         'pulse-slow': 'pulse-slow 2s ease-in-out infinite',
         'slide-up': 'slide-up 0.3s ease-out',
+        'slide-out-up': 'slide-out-up 0.3s ease-out forwards',
+        'slide-in-up': 'slide-in-up 0.3s ease-out',
       },
     },
   },

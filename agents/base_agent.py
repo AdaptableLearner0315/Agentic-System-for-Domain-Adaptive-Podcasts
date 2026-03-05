@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from anthropic import Anthropic, APITimeoutError, APIStatusError
 
+from config.llm import MODEL_OPTIONS
+
 
 class BaseAgent(ABC):
     """
@@ -29,7 +31,7 @@ class BaseAgent(ABC):
         self,
         name: str,
         output_category: str = "general",
-        model: str = "claude-opus-4-5-20250514"
+        model: str = None
     ):
         """
         Initialize the base agent.
@@ -37,8 +39,10 @@ class BaseAgent(ABC):
         Args:
             name: Agent name for logging
             output_category: Output subdirectory (e.g., "audio", "visuals", "scripts")
-            model: LLM model to use (default: claude-opus-4-5-20250514)
+            model: LLM model to use (default: opus from config)
         """
+        if model is None:
+            model = MODEL_OPTIONS["opus"]
         self.name = name
         self.model = model
         self.client = Anthropic(timeout=120.0)

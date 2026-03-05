@@ -330,7 +330,7 @@ N. **<Short description>**: <Root cause> → <Fix applied>
 5. **Audio cutoff at module transitions**: FFmpeg `-shortest` flag → Remove flag in video_assembler.py
 6. **Harsh punk section**: Distorted BGM prompts → Replace with driving/rhythmic (clean guitars)
 7. **WebSocket disconnect on tab switch**: Browser suspends connection → Implement reconnection logic with exponential backoff
-8. **CORS error on port 3001**: Default only allows 3000 → Add 3001 to cors_origins in config.py
+8. **CORS error on alternate ports**: Next.js falls back to 3001, 3002, etc. when port in use → Config now allows ports 3000-3010 dynamically
 
 ---
 
@@ -344,8 +344,7 @@ ANTHROPIC_API_KEY=your-anthropic-key
 
 ### Backend Environment
 ```bash
-# .env
-CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+# .env (CORS_ORIGINS defaults to ports 3000-3010, override only if needed)
 OUTPUT_DIR=./Output
 UPLOAD_DIR=./uploads
 ```

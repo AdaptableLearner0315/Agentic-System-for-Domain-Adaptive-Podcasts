@@ -229,3 +229,43 @@ class ConfigResponse(BaseModel):
     modes: Dict[str, ModeConfig]
     supported_formats: List[str]
     max_file_size_mb: int = 100
+
+
+class LogEntry(BaseModel):
+    """
+    Individual log entry for job execution.
+
+    Attributes:
+        timestamp: When the log entry was created
+        level: Log level (INFO, ERROR, WARNING)
+        message: Log message
+        phase: Generation phase when log was created
+    """
+    timestamp: str
+    level: str = Field(..., description="Log level: INFO, ERROR, WARNING")
+    message: str
+    phase: Optional[str] = None
+
+
+class JobLogsResponse(BaseModel):
+    """
+    Execution logs for a job.
+
+    Attributes:
+        job_id: Unique job identifier
+        status: Current job status
+        mode: Pipeline mode used
+        created_at: Job creation timestamp
+        started_at: Job start timestamp
+        completed_at: Job completion timestamp
+        error: Error message if job failed
+        logs: List of log entries
+    """
+    job_id: str
+    status: str
+    mode: str
+    created_at: str
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    logs: List[LogEntry] = Field(default_factory=list)

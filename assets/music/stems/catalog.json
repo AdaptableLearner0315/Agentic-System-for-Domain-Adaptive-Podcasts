@@ -1,0 +1,491 @@
+{
+  "stems": {
+    "atmosphere": [
+      {
+        "id": "atm_wonder_001",
+        "path": "atmosphere/wonder_001.wav",
+        "emotion": "wonder",
+        "energy_range": [3, 6],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "C_major",
+        "tags": ["ambient", "pads", "expansive"]
+      },
+      {
+        "id": "atm_wonder_002",
+        "path": "atmosphere/wonder_002.wav",
+        "emotion": "wonder",
+        "energy_range": [4, 7],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "G_major",
+        "tags": ["strings", "airy", "uplifting"]
+      },
+      {
+        "id": "atm_curiosity_001",
+        "path": "atmosphere/curiosity_001.wav",
+        "emotion": "curiosity",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "G_major",
+        "tags": ["playful", "light", "inquisitive"]
+      },
+      {
+        "id": "atm_tension_001",
+        "path": "atmosphere/tension_001.wav",
+        "emotion": "tension",
+        "energy_range": [5, 8],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "A_minor",
+        "tags": ["suspense", "dark", "building"]
+      },
+      {
+        "id": "atm_tension_002",
+        "path": "atmosphere/tension_002.wav",
+        "emotion": "tension",
+        "energy_range": [6, 9],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "E_minor",
+        "tags": ["ominous", "dense", "low_synth"]
+      },
+      {
+        "id": "atm_triumph_001",
+        "path": "atmosphere/triumph_001.wav",
+        "emotion": "triumph",
+        "energy_range": [7, 10],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "C_major",
+        "tags": ["victorious", "grand", "orchestral"]
+      },
+      {
+        "id": "atm_melancholy_001",
+        "path": "atmosphere/melancholy_001.wav",
+        "emotion": "melancholy",
+        "energy_range": [2, 4],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "A_minor",
+        "tags": ["sad", "sparse", "emotional"]
+      },
+      {
+        "id": "atm_intrigue_001",
+        "path": "atmosphere/intrigue_001.wav",
+        "emotion": "intrigue",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "E_minor",
+        "tags": ["mysterious", "subtle", "anticipation"]
+      },
+      {
+        "id": "atm_excitement_001",
+        "path": "atmosphere/excitement_001.wav",
+        "emotion": "excitement",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "A_major",
+        "tags": ["bright", "energetic", "synth"]
+      },
+      {
+        "id": "atm_reflection_001",
+        "path": "atmosphere/reflection_001.wav",
+        "emotion": "reflection",
+        "energy_range": [2, 4],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "F_major",
+        "tags": ["contemplative", "warm", "soft"]
+      },
+      {
+        "id": "atm_restlessness_001",
+        "path": "atmosphere/restlessness_001.wav",
+        "emotion": "restlessness",
+        "energy_range": [5, 7],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "D_minor",
+        "tags": ["edgy", "unsettled", "tension"]
+      },
+      {
+        "id": "atm_explosive_001",
+        "path": "atmosphere/explosive_001.wav",
+        "emotion": "explosive_energy",
+        "energy_range": [9, 10],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "E_major",
+        "tags": ["powerful", "intense", "full"]
+      },
+      {
+        "id": "atm_rebellion_001",
+        "path": "atmosphere/rebellion_001.wav",
+        "emotion": "rebellion",
+        "energy_range": [8, 10],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "E_minor",
+        "tags": ["raw", "defiant", "distorted"]
+      },
+      {
+        "id": "atm_liberation_001",
+        "path": "atmosphere/liberation_001.wav",
+        "emotion": "liberation",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "G_major",
+        "tags": ["soaring", "freeing", "euphoric"]
+      },
+      {
+        "id": "atm_experimentation_001",
+        "path": "atmosphere/experimentation_001.wav",
+        "emotion": "experimentation",
+        "energy_range": [4, 6],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "F_major",
+        "tags": ["creative", "innovative", "textures"]
+      },
+      {
+        "id": "atm_mastery_001",
+        "path": "atmosphere/mastery_001.wav",
+        "emotion": "mastery",
+        "energy_range": [5, 7],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "D_major",
+        "tags": ["refined", "confident", "polished"]
+      },
+      {
+        "id": "atm_intensity_001",
+        "path": "atmosphere/intensity_001.wav",
+        "emotion": "intensity",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "A_minor",
+        "tags": ["focused", "powerful", "driving"]
+      },
+      {
+        "id": "atm_neutral_001",
+        "path": "atmosphere/neutral_001.wav",
+        "emotion": "neutral",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "loop_compatible": true,
+        "key": "C_major",
+        "tags": ["balanced", "supportive", "ambient"]
+      }
+    ],
+    "rhythm": [
+      {
+        "id": "rhy_wonder_001",
+        "path": "rhythm/wonder_001.wav",
+        "emotion": "wonder",
+        "energy_range": [4, 6],
+        "duration_ms": 60000,
+        "tempo_bpm": 90,
+        "loop_compatible": true,
+        "tags": ["soft_percussion", "gentle", "flowing"]
+      },
+      {
+        "id": "rhy_curiosity_001",
+        "path": "rhythm/curiosity_001.wav",
+        "emotion": "curiosity",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "tempo_bpm": 95,
+        "loop_compatible": true,
+        "tags": ["playful", "light", "plucks"]
+      },
+      {
+        "id": "rhy_tension_001",
+        "path": "rhythm/tension_001.wav",
+        "emotion": "tension",
+        "energy_range": [5, 8],
+        "duration_ms": 60000,
+        "tempo_bpm": 105,
+        "loop_compatible": true,
+        "tags": ["building", "percussion", "driving"]
+      },
+      {
+        "id": "rhy_tension_002",
+        "path": "rhythm/tension_002.wav",
+        "emotion": "tension",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "tempo_bpm": 115,
+        "loop_compatible": true,
+        "tags": ["intense", "urgent", "pulsing"]
+      },
+      {
+        "id": "rhy_triumph_001",
+        "path": "rhythm/triumph_001.wav",
+        "emotion": "triumph",
+        "energy_range": [7, 10],
+        "duration_ms": 60000,
+        "tempo_bpm": 120,
+        "loop_compatible": true,
+        "tags": ["celebratory", "drums", "powerful"]
+      },
+      {
+        "id": "rhy_excitement_001",
+        "path": "rhythm/excitement_001.wav",
+        "emotion": "excitement",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "tempo_bpm": 130,
+        "loop_compatible": true,
+        "tags": ["energetic", "drums", "bass"]
+      },
+      {
+        "id": "rhy_restlessness_001",
+        "path": "rhythm/restlessness_001.wav",
+        "emotion": "restlessness",
+        "energy_range": [5, 7],
+        "duration_ms": 60000,
+        "tempo_bpm": 108,
+        "loop_compatible": true,
+        "tags": ["edgy", "syncopated", "unsettled"]
+      },
+      {
+        "id": "rhy_explosive_001",
+        "path": "rhythm/explosive_001.wav",
+        "emotion": "explosive_energy",
+        "energy_range": [9, 10],
+        "duration_ms": 60000,
+        "tempo_bpm": 145,
+        "loop_compatible": true,
+        "tags": ["maximum_intensity", "drums", "driving"]
+      },
+      {
+        "id": "rhy_rebellion_001",
+        "path": "rhythm/rebellion_001.wav",
+        "emotion": "rebellion",
+        "energy_range": [8, 10],
+        "duration_ms": 60000,
+        "tempo_bpm": 125,
+        "loop_compatible": true,
+        "tags": ["aggressive", "drums", "raw"]
+      },
+      {
+        "id": "rhy_liberation_001",
+        "path": "rhythm/liberation_001.wav",
+        "emotion": "liberation",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "tempo_bpm": 118,
+        "loop_compatible": true,
+        "tags": ["freeing", "uplifting", "driving"]
+      },
+      {
+        "id": "rhy_intensity_001",
+        "path": "rhythm/intensity_001.wav",
+        "emotion": "intensity",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "tempo_bpm": 115,
+        "loop_compatible": true,
+        "tags": ["focused", "percussion", "relentless"]
+      },
+      {
+        "id": "rhy_neutral_001",
+        "path": "rhythm/neutral_001.wav",
+        "emotion": "neutral",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "tempo_bpm": 90,
+        "loop_compatible": true,
+        "tags": ["balanced", "soft", "supportive"]
+      }
+    ],
+    "melody": [
+      {
+        "id": "mel_wonder_001",
+        "path": "melody/wonder_001.wav",
+        "emotion": "wonder",
+        "energy_range": [3, 6],
+        "duration_ms": 60000,
+        "key": "C_major",
+        "loop_compatible": true,
+        "tags": ["piano", "uplifting", "airy"]
+      },
+      {
+        "id": "mel_wonder_002",
+        "path": "melody/wonder_002.wav",
+        "emotion": "wonder",
+        "energy_range": [5, 7],
+        "duration_ms": 60000,
+        "key": "G_major",
+        "loop_compatible": true,
+        "tags": ["strings", "expansive", "emotional"]
+      },
+      {
+        "id": "mel_curiosity_001",
+        "path": "melody/curiosity_001.wav",
+        "emotion": "curiosity",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "key": "G_major",
+        "loop_compatible": true,
+        "tags": ["piano", "playful", "inquisitive"]
+      },
+      {
+        "id": "mel_triumph_001",
+        "path": "melody/triumph_001.wav",
+        "emotion": "triumph",
+        "energy_range": [7, 10],
+        "duration_ms": 60000,
+        "key": "C_major",
+        "loop_compatible": true,
+        "tags": ["brass", "victorious", "climactic"]
+      },
+      {
+        "id": "mel_melancholy_001",
+        "path": "melody/melancholy_001.wav",
+        "emotion": "melancholy",
+        "energy_range": [2, 4],
+        "duration_ms": 60000,
+        "key": "A_minor",
+        "loop_compatible": true,
+        "tags": ["piano", "sad", "emotional"]
+      },
+      {
+        "id": "mel_intrigue_001",
+        "path": "melody/intrigue_001.wav",
+        "emotion": "intrigue",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "key": "E_minor",
+        "loop_compatible": true,
+        "tags": ["mysterious", "piano", "subtle"]
+      },
+      {
+        "id": "mel_excitement_001",
+        "path": "melody/excitement_001.wav",
+        "emotion": "excitement",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "key": "A_major",
+        "loop_compatible": true,
+        "tags": ["synths", "energetic", "bright"]
+      },
+      {
+        "id": "mel_reflection_001",
+        "path": "melody/reflection_001.wav",
+        "emotion": "reflection",
+        "energy_range": [2, 4],
+        "duration_ms": 60000,
+        "key": "F_major",
+        "loop_compatible": true,
+        "tags": ["piano", "contemplative", "gentle"]
+      },
+      {
+        "id": "mel_explosive_001",
+        "path": "melody/explosive_001.wav",
+        "emotion": "explosive_energy",
+        "energy_range": [9, 10],
+        "duration_ms": 60000,
+        "key": "E_major",
+        "loop_compatible": true,
+        "tags": ["synths", "guitars", "intense"]
+      },
+      {
+        "id": "mel_rebellion_001",
+        "path": "melody/rebellion_001.wav",
+        "emotion": "rebellion",
+        "energy_range": [8, 10],
+        "duration_ms": 60000,
+        "key": "E_minor",
+        "loop_compatible": true,
+        "tags": ["guitars", "defiant", "powerful"]
+      },
+      {
+        "id": "mel_liberation_001",
+        "path": "melody/liberation_001.wav",
+        "emotion": "liberation",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "key": "G_major",
+        "loop_compatible": true,
+        "tags": ["strings", "soaring", "euphoric"]
+      },
+      {
+        "id": "mel_experimentation_001",
+        "path": "melody/experimentation_001.wav",
+        "emotion": "experimentation",
+        "energy_range": [4, 6],
+        "duration_ms": 60000,
+        "key": "F_major",
+        "loop_compatible": true,
+        "tags": ["synths", "creative", "innovative"]
+      },
+      {
+        "id": "mel_mastery_001",
+        "path": "melody/mastery_001.wav",
+        "emotion": "mastery",
+        "energy_range": [5, 7],
+        "duration_ms": 60000,
+        "key": "D_major",
+        "loop_compatible": true,
+        "tags": ["piano", "refined", "accomplished"]
+      },
+      {
+        "id": "mel_intensity_001",
+        "path": "melody/intensity_001.wav",
+        "emotion": "intensity",
+        "energy_range": [7, 9],
+        "duration_ms": 60000,
+        "key": "A_minor",
+        "loop_compatible": true,
+        "tags": ["strings", "synths", "focused"]
+      },
+      {
+        "id": "mel_neutral_001",
+        "path": "melody/neutral_001.wav",
+        "emotion": "neutral",
+        "energy_range": [3, 5],
+        "duration_ms": 60000,
+        "key": "C_major",
+        "loop_compatible": true,
+        "tags": ["piano", "balanced", "supportive"]
+      }
+    ]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "total_stems": 45,
+    "layers": ["atmosphere", "rhythm", "melody"],
+    "emotions_covered": [
+      "wonder",
+      "curiosity",
+      "tension",
+      "triumph",
+      "melancholy",
+      "intrigue",
+      "excitement",
+      "reflection",
+      "restlessness",
+      "explosive_energy",
+      "rebellion",
+      "liberation",
+      "experimentation",
+      "mastery",
+      "intensity",
+      "neutral"
+    ],
+    "energy_range": {
+      "min": 2,
+      "max": 10
+    },
+    "format": "wav",
+    "sample_rate": 44100,
+    "bit_depth": 24,
+    "loop_crossfade_ms": 50
+  }
+}

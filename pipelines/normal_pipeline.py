@@ -23,6 +23,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
 from config.modes import get_mode_config, NORMAL_BGM_SEGMENTS
+from config.llm import MODEL_OPTIONS
 from config.paths import OUTPUT_DIR, AUDIO_DIR, TTS_DIR, BGM_DIR, VISUALS_DIR, ensure_directories
 from utils.input_router import InputRouter, ExtractedContent
 from utils.parallel_executor import (
@@ -134,6 +135,11 @@ class NormalPipeline:
             from assets.image_manager import ImageAssetManager
             self._image_manager = ImageAssetManager()
         return self._image_manager
+
+    @property
+    def use_intelligent_bgm(self) -> bool:
+        """Check if intelligent BGM system should be used."""
+        return self.config.get("bgm", {}).get("use_intelligent", False)
 
     async def run(
         self,
@@ -328,14 +334,16 @@ class NormalPipeline:
         """
         from agents.script_designer_agent import ScriptDesignerAgent
 
-        # Use sonnet for faster enhancement
+        # Use model from config
         model = self.config["script"]["model"]
-        model_id = f"claude-{model}-4-20250514" if model == "sonnet" else "claude-opus-4-5-20250514"
+        model_id = MODEL_OPTIONS.get(model, MODEL_OPTIONS["sonnet"])
 
         enhancer = ScriptDesignerAgent(model=model_id)
 
         # Get target duration from content metadata (set by SmartInputHandler)
         target_duration = content.metadata.get("target_duration_minutes")
+        # Get conversational style flag (set by PipelineService)
+        conversational_style = content.metadata.get("conversational_style", False)
 
         # Run enhancement in thread pool
         loop = asyncio.get_event_loop()
@@ -343,7 +351,8 @@ class NormalPipeline:
             None,
             lambda: enhancer.enhance(
                 content.text,
-                target_duration_minutes=target_duration
+                target_duration_minutes=target_duration,
+                conversational_style=conversational_style
             )
         )
 
@@ -584,9 +593,111 @@ class NormalPipeline:
 
         return emotions if emotions else ["neutral"]
 
+    async def _generate_bgm_intelligent(self, script: Dict[str, Any]) -> Optional[str]:
+        """
+        Generate BGM using the Music Intelligence System.
+
+        Uses emotion-aware track selection and intelligent crossfades for
+        a more cohesive soundtrack. Falls back to existing stem mixing
+        or API generation if MusicIntelligence fails.
+
+        Args:
+            script: Enhanced script dictionary with emotions per chunk.
+
+        Returns:
+            Path to the generated BGM file, or None if generation failed.
+        """
+        try:
+            from agents.music_intelligence import MusicIntelligence
+
+            print("[NormalPipeline] Using Music Intelligence System for BGM")
+            mi = MusicIntelligence(mode="normal")
+
+            # Extract emotion timeline from script
+            timeline = mi.extract_emotion_timeline(script)
+
+            if not timeline:
+                print("[NormalPipeline] No emotion timeline extracted, using fallback")
+                return None
+
+            print(f"[NormalPipeline] Extracted {len(timeline)} emotion segments")
+
+            # Compose BGM using Normal mode (fast track selection)
+            bgm_path = mi.compose_for_normal(timeline)
+
+            if bgm_path and Path(bgm_path).exists():
+                print(f"[NormalPipeline] Music Intelligence generated BGM: {bgm_path}")
+                return bgm_path
+            else:
+                print("[NormalPipeline] Music Intelligence returned invalid path")
+                return None
+
+        except ImportError as e:
+            print(f"[NormalPipeline] Music Intelligence not available: {e}")
+            return None
+        except Exception as e:
+            print(f"[NormalPipeline] Music Intelligence failed, using fallback: {e}")
+            return None
+
+    def _generate_bgm_fallback(
+        self,
+        script: Dict[str, Any],
+        emotions: List[str],
+        output_filename: str
+    ) -> Optional[str]:
+        """
+        Fallback BGM generation using stems or API.
+
+        Called when Music Intelligence System is disabled or fails.
+
+        Args:
+            script: Enhanced script dictionary.
+            emotions: List of emotions extracted from script.
+            output_filename: Output filename for the generated BGM.
+
+        Returns:
+            Path to the generated BGM file, or None if generation failed.
+        """
+        # Try stem mixing first (MUCH faster: 2-5s vs 20-30s)
+        if self.config["bgm"]["use_stems"] and self.music_manager.has_stems():
+            return self._mix_bgm_from_stems(emotions, output_filename)
+
+        # Fall back to API generation
+        from agents.audio_designer.bgm_generator import BGMGenerator
+        generator = BGMGenerator(output_dir=AUDIO_DIR / "bgm")
+
+        # Generate first segment as representative BGM
+        seg_config = NORMAL_BGM_SEGMENTS.get(1, {})
+        emotion = emotions[0] if emotions else "neutral"
+        return generator.generate_bgm(
+            emotion,
+            output_filename,
+            seg_config.get("duration", 30)
+        )
+
     def _prepare_bgm_tasks(self, script: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Prepare BGM tasks - use stems if available, otherwise API generation."""
+        """
+        Prepare BGM tasks - use intelligent system, stems, or API generation.
+
+        Priority order:
+        1. Music Intelligence System (if use_intelligent=True in config)
+        2. Pre-generated stems (if use_stems=True and stems available)
+        3. API generation (fallback)
+        """
         emotions = self._extract_emotions_from_script(script)
+
+        # Check if Music Intelligence System should be used
+        if self.use_intelligent_bgm:
+            print("[NormalPipeline] Music Intelligence enabled, using intelligent BGM task")
+            # Return a single task that will use the intelligent system
+            return [{
+                "id": "bgm_intelligent",
+                "segment_id": 0,  # Special marker for intelligent system
+                "filename": "bgm_intelligent",
+                "emotions": emotions,
+                "use_intelligent": True,
+                "script": script,  # Pass script for emotion timeline extraction
+            }]
 
         # Check if we should use pre-generated stems (MUCH faster: 2-5s vs 20-30s)
         if self.config["bgm"]["use_stems"] and self.music_manager.has_stems():
@@ -676,7 +787,49 @@ class NormalPipeline:
         duration: int,
         **kwargs
     ) -> Optional[str]:
-        """Generate BGM segment - via stems if flagged, otherwise API."""
+        """
+        Generate BGM segment - via intelligent system, stems, or API.
+
+        Args:
+            emotion: Primary emotion for BGM generation.
+            output_filename: Output filename for the generated BGM.
+            duration: Duration in seconds for API-generated BGM.
+            **kwargs: Additional arguments including:
+                - use_intelligent: Use Music Intelligence System
+                - use_stems: Use pre-generated stem mixing
+                - emotions: List of emotions for stem selection
+                - script: Script dict for intelligent system
+
+        Returns:
+            Path to the generated BGM file, or None if generation failed.
+        """
+        # Check if this is a Music Intelligence task
+        if kwargs.get("use_intelligent"):
+            script = kwargs.get("script", {})
+            emotions = kwargs.get("emotions", [emotion])
+
+            # Run intelligent generation synchronously (it's designed to be fast)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're already in an async context, run directly
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._run_intelligent_bgm_sync, script)
+                    bgm_path = future.result()
+            else:
+                bgm_path = loop.run_until_complete(
+                    self._generate_bgm_intelligent(script)
+                )
+
+            # If intelligent system succeeded, return the path
+            if bgm_path:
+                return bgm_path
+
+            # Fall back to existing approaches
+            print("[NormalPipeline] Intelligent BGM failed, trying fallback")
+            return self._generate_bgm_fallback(script, emotions, output_filename)
+
         # Check if this is a stem-mixing task
         if kwargs.get("use_stems"):
             return self._mix_bgm_from_stems(
@@ -688,6 +841,38 @@ class NormalPipeline:
         from agents.audio_designer.bgm_generator import BGMGenerator
         generator = BGMGenerator(output_dir=AUDIO_DIR / "bgm")
         return generator.generate_bgm(emotion, output_filename, duration)
+
+    def _run_intelligent_bgm_sync(self, script: Dict[str, Any]) -> Optional[str]:
+        """
+        Synchronous wrapper for intelligent BGM generation.
+
+        Used when running from within an async context where we need
+        to execute the intelligent system in a thread pool.
+
+        Args:
+            script: Enhanced script dictionary.
+
+        Returns:
+            Path to generated BGM file, or None if failed.
+        """
+        try:
+            from agents.music_intelligence import MusicIntelligence
+
+            mi = MusicIntelligence(mode="normal")
+            timeline = mi.extract_emotion_timeline(script)
+
+            if not timeline:
+                return None
+
+            bgm_path = mi.compose_for_normal(timeline)
+
+            if bgm_path and Path(bgm_path).exists():
+                return bgm_path
+            return None
+
+        except Exception as e:
+            print(f"[NormalPipeline] Sync intelligent BGM failed: {e}")
+            return None
 
     def _mix_bgm_from_stems(
         self,

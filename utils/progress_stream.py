@@ -20,17 +20,27 @@ class GenerationPhase(Enum):
     Normal mode: INITIALIZING -> ANALYZING -> SCRIPTING -> GENERATING_ASSETS ->
         MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
 
-    Pro mode: INITIALIZING -> ANALYZING -> SCRIPTING -> GENERATING_TTS ->
-        GENERATING_BGM -> GENERATING_IMAGES -> MIXING_AUDIO ->
-        ASSEMBLING_VIDEO -> COMPLETE
+    Pro mode: INITIALIZING -> ANALYZING -> SCRIPTING -> VALIDATING ->
+        GENERATING_TTS -> GENERATING_BGM -> GENERATING_IMAGES ->
+        MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
+
+    Ultra mode: INITIALIZING -> ANALYZING -> SCRIPTING -> DIRECTOR_REVIEW ->
+        VALIDATING -> GENERATING_TTS -> GENERATING_BGM -> GENERATING_IMAGES ->
+        MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
 
     GENERATING_ASSETS is a combined phase for Normal mode that tracks TTS,
     BGM, and image generation under a single phase with sub-progress in
     ``details.parallel_status``.
+
+    DIRECTOR_REVIEW is an Ultra-only phase for the director review loop that
+    can take 45-90 seconds. VALIDATING covers emotion validation and
+    speaker assignment (Pro and Ultra modes).
     """
     INITIALIZING = "initializing"
     ANALYZING = "analyzing"
     SCRIPTING = "scripting"
+    DIRECTOR_REVIEW = "director_review"  # Pro-only: Director review loop
+    VALIDATING = "validating"  # Pro-only: Emotion validation + speaker assignment
     GENERATING_TTS = "generating_tts"
     GENERATING_BGM = "generating_bgm"
     GENERATING_IMAGES = "generating_images"
@@ -77,12 +87,13 @@ class ProgressStream:
     - ETA estimation
     - Preview content streaming
     - Callback support for UI integration
+    - Mode-specific weights (Normal vs Pro)
     """
 
     #: Weights for overall progress calculation (Normal mode).
     #: GENERATING_ASSETS carries 60% of the weight (replacing the previous
     #: GENERATING_TTS: 25 + GENERATING_BGM: 20 + GENERATING_IMAGES: 15).
-    PHASE_WEIGHTS = {
+    NORMAL_PHASE_WEIGHTS = {
         GenerationPhase.INITIALIZING: 2,
         GenerationPhase.ANALYZING: 5,
         GenerationPhase.SCRIPTING: 20,
@@ -91,14 +102,48 @@ class ProgressStream:
         GenerationPhase.ASSEMBLING_VIDEO: 5,
     }
 
-    def __init__(self, callback: Optional[Callable[[ProgressUpdate], None]] = None):
+    #: Weights for Pro mode progress calculation.
+    #: Pro mode skips director review for speed (~2-3 min).
+    PRO_PHASE_WEIGHTS = {
+        GenerationPhase.INITIALIZING: 2,
+        GenerationPhase.ANALYZING: 3,
+        GenerationPhase.SCRIPTING: 10,  # Single enhancement pass
+        GenerationPhase.VALIDATING: 5,  # Emotion validation + speaker assignment
+        GenerationPhase.GENERATING_TTS: 25,
+        GenerationPhase.GENERATING_BGM: 20,
+        GenerationPhase.GENERATING_IMAGES: 15,
+        GenerationPhase.MIXING_AUDIO: 10,
+        GenerationPhase.ASSEMBLING_VIDEO: 10,
+    }
+
+    #: Weights for Ultra mode progress calculation.
+    #: Ultra mode includes full director review loop (~5-8 min).
+    ULTRA_PHASE_WEIGHTS = {
+        GenerationPhase.INITIALIZING: 2,
+        GenerationPhase.ANALYZING: 3,
+        GenerationPhase.SCRIPTING: 5,  # Initial script enhancement
+        GenerationPhase.DIRECTOR_REVIEW: 15,  # Director review loop (45-90s)
+        GenerationPhase.VALIDATING: 5,  # Emotion validation + speaker assignment
+        GenerationPhase.GENERATING_TTS: 20,
+        GenerationPhase.GENERATING_BGM: 15,
+        GenerationPhase.GENERATING_IMAGES: 15,
+        GenerationPhase.MIXING_AUDIO: 10,
+        GenerationPhase.ASSEMBLING_VIDEO: 10,
+    }
+
+    # Backwards compatibility alias
+    PHASE_WEIGHTS = NORMAL_PHASE_WEIGHTS
+
+    def __init__(self, callback: Optional[Callable[[ProgressUpdate], None]] = None, mode: str = "normal"):
         """
         Initialize the ProgressStream.
 
         Args:
             callback: Optional callback for progress updates
+            mode: Pipeline mode ("normal" or "pro") - affects phase weights
         """
         self._callback = callback
+        self._mode = mode
         self._start_time = time.time()
         self._phase_start_time = time.time()
         self._current_phase = GenerationPhase.INITIALIZING
@@ -106,16 +151,72 @@ class ProgressStream:
         self._phase_durations: Dict[str, float] = {}
         self._updates = []
 
+    def set_mode(self, mode: str):
+        """Set the pipeline mode (normal or pro)."""
+        self._mode = mode
+
+    def _get_phase_weights(self) -> Dict[GenerationPhase, int]:
+        """Get phase weights based on current mode."""
+        if self._mode == "ultra":
+            return self.ULTRA_PHASE_WEIGHTS
+        if self._mode == "pro":
+            return self.PRO_PHASE_WEIGHTS
+        return self.NORMAL_PHASE_WEIGHTS
+
+    def get_expected_duration_hint(self) -> Dict[str, Any]:
+        """
+        Get expected duration hints based on mode.
+
+        Returns:
+            Dictionary with duration hints for UI display.
+        """
+        if self._mode == "ultra":
+            return {
+                "mode": "ultra",
+                "expected_minutes_min": 5,
+                "expected_minutes_max": 8,
+                "hint": "Ultra mode takes 5-8 minutes for premium quality",
+                "phases": {
+                    "scripting": "1-2 min (includes director review)",
+                    "assets": "3-5 min (TTS + BGM + Images)",
+                    "assembly": "1-2 min",
+                }
+            }
+        if self._mode == "pro":
+            return {
+                "mode": "pro",
+                "expected_minutes_min": 2,
+                "expected_minutes_max": 3,
+                "hint": "Pro mode takes 2-3 minutes for balanced quality",
+                "phases": {
+                    "scripting": "30-45 sec",
+                    "assets": "1-2 min (TTS + BGM + Images)",
+                    "assembly": "30-45 sec",
+                }
+            }
+        return {
+            "mode": "normal",
+            "expected_minutes_min": 1,
+            "expected_minutes_max": 2,
+            "hint": "Normal mode takes 1-2 minutes",
+            "phases": {
+                "scripting": "30-45 sec",
+                "assets": "45-60 sec",
+                "assembly": "15-30 sec",
+            }
+        }
+
     def set_callback(self, callback: Callable[[ProgressUpdate], None]):
         """Set the progress callback."""
         self._callback = callback
 
     def _calculate_overall_progress(self) -> float:
         """Calculate overall progress as weighted sum of phase progress."""
-        total_weight = sum(self.PHASE_WEIGHTS.values())
+        weights = self._get_phase_weights()
+        total_weight = sum(weights.values())
         completed_weight = 0
 
-        for phase, weight in self.PHASE_WEIGHTS.items():
+        for phase, weight in weights.items():
             completed_weight += weight * self._phase_progress.get(phase, 0.0) / 100
 
         return (completed_weight / total_weight) * 100
@@ -202,7 +303,12 @@ class ProgressStream:
     def start(self, message: str = "Starting generation...") -> ProgressUpdate:
         """Mark generation start."""
         self._start_time = time.time()
-        return self.update(GenerationPhase.INITIALIZING, message)
+        duration_hint = self.get_expected_duration_hint()
+        return self.update(
+            GenerationPhase.INITIALIZING,
+            message,
+            details={"duration_hint": duration_hint}
+        )
 
     def complete(self, output_path: str) -> ProgressUpdate:
         """Mark generation complete."""
@@ -238,6 +344,89 @@ class ProgressStream:
         preview: Optional[str] = None
     ) -> ProgressUpdate:
         return self.update(GenerationPhase.SCRIPTING, message, preview=preview)
+
+    def director_review(
+        self,
+        round_num: int,
+        max_rounds: int,
+        sub_step: str = "reviewing",
+        message: Optional[str] = None
+    ) -> ProgressUpdate:
+        """
+        Report director review progress (Pro mode).
+
+        Args:
+            round_num: Current review round (1-indexed)
+            max_rounds: Maximum number of review rounds
+            sub_step: Current sub-step ("enhancing", "reviewing", "approved")
+            message: Optional custom message
+
+        Returns:
+            ProgressUpdate with DIRECTOR_REVIEW phase
+        """
+        if message is None:
+            if sub_step == "enhancing":
+                message = f"Round {round_num}/{max_rounds}: Enhancing script..."
+            elif sub_step == "reviewing":
+                message = f"Round {round_num}/{max_rounds}: Director reviewing..."
+            elif sub_step == "approved":
+                message = f"Round {round_num}/{max_rounds}: Script approved!"
+            else:
+                message = f"Round {round_num}/{max_rounds}: {sub_step}"
+
+        # Calculate progress within director review phase
+        # Each round has 2 sub-steps: enhance (50%) + review (50%)
+        round_progress = (round_num - 1) / max_rounds  # Completed rounds
+        sub_progress = 0.5 if sub_step in ("reviewing", "approved") else 0
+        phase_progress = ((round_progress + (sub_progress / max_rounds)) * 100)
+
+        return self.update(
+            GenerationPhase.DIRECTOR_REVIEW,
+            message,
+            step=round_num,
+            total=max_rounds,
+            details={
+                "round": round_num,
+                "max_rounds": max_rounds,
+                "sub_step": sub_step,
+                "phase_progress": phase_progress,
+                "estimated_phase_duration_seconds": max_rounds * 30,  # ~30s per round
+            }
+        )
+
+    def validating(
+        self,
+        step: str = "emotions",
+        message: Optional[str] = None
+    ) -> ProgressUpdate:
+        """
+        Report validation progress (Pro mode).
+
+        Args:
+            step: Current validation step ("emotions", "speakers", "complete")
+            message: Optional custom message
+
+        Returns:
+            ProgressUpdate with VALIDATING phase
+        """
+        if message is None:
+            if step == "emotions":
+                message = "Validating emotions..."
+            elif step == "speakers":
+                message = "Assigning speakers..."
+            elif step == "complete":
+                message = "Validation complete"
+            else:
+                message = f"Validating: {step}"
+
+        step_num = {"emotions": 1, "speakers": 2, "complete": 2}.get(step, 1)
+        return self.update(
+            GenerationPhase.VALIDATING,
+            message,
+            step=step_num,
+            total=2,
+            details={"validation_step": step}
+        )
 
     def generating_tts(
         self,

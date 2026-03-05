@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from .config import get_settings, Settings
-from .routes import pipelines, files, config, outputs, trailer, interactive
+from .routes import pipelines, files, config, outputs, trailer, interactive, memory
 from .websockets import progress, interactive as interactive_ws
 from .models.responses import HealthResponse, ErrorResponse
 from .database.connection import init_db, close_db
@@ -162,6 +162,10 @@ def create_app() -> FastAPI:
         interactive.router,
         prefix=f"{settings.api_prefix}/interactive",
         tags=["Interactive"]
+    )
+    app.include_router(
+        memory.router,
+        tags=["User Memory"]
     )
 
     # Mount WebSocket routes

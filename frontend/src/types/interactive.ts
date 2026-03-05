@@ -318,6 +318,8 @@ export interface UseVoiceRecordingReturn {
   requestPermission: () => Promise<boolean>
   /** Error message (if any) */
   error: string | null
+  /** Get the current MediaStream (if recording) */
+  getStream: () => MediaStream | null
 }
 
 /**
@@ -349,4 +351,84 @@ export interface InteractiveErrorResponse {
   error: string
   message: string
   details?: Record<string, unknown>
+}
+
+// =============================================================================
+// Voice Experience Types
+// =============================================================================
+
+/**
+ * Voice experience states.
+ */
+export type VoiceState =
+  | 'idle'
+  | 'listening'
+  | 'recording'
+  | 'paused'
+  | 'countdown'
+  | 'processing'
+  | 'speaking'
+
+/**
+ * Events that trigger voice state transitions.
+ */
+export type VoiceEvent =
+  | 'tap'
+  | 'speech_start'
+  | 'speech_end'
+  | 'silence_detected'
+  | 'countdown_complete'
+  | 'response_ready'
+  | 'speaking_complete'
+  | 'interrupt'
+  | 'cancel'
+  | 'error'
+
+/**
+ * Voice activity configuration.
+ */
+export interface VoiceActivityConfig {
+  /** Threshold for speech detection (0-1) */
+  speechThreshold?: number
+  /** Threshold for silence detection (0-1) */
+  silenceThreshold?: number
+  /** Milliseconds of silence before triggering silence event */
+  silenceDelayMs?: number
+  /** Minimum speech duration to be considered valid */
+  minSpeechDurationMs?: number
+}
+
+/**
+ * Adaptive threshold data.
+ */
+export interface AdaptiveThresholdData {
+  /** Computed silence threshold in milliseconds */
+  silenceThresholdMs: number
+  /** Number of false positives */
+  falsePositives: number
+  /** Total interactions */
+  totalInteractions: number
+  /** Whether thresholds are personalized */
+  isPersonalized: boolean
+}
+
+/**
+ * User memory consent status.
+ */
+export type MemoryConsentStatus = 'pending' | 'granted' | 'denied'
+
+/**
+ * User memory preferences.
+ */
+export interface UserMemoryPreferences {
+  /** Whether memory is enabled */
+  enabled: boolean
+  /** User's display name */
+  displayName?: string
+  /** Preferred communication style */
+  communicationStyle?: 'concise' | 'detailed' | 'balanced'
+  /** Topics of interest */
+  interests?: string[]
+  /** Expertise level */
+  expertiseLevel?: 'beginner' | 'intermediate' | 'expert'
 }

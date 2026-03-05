@@ -39,7 +39,12 @@ class Settings(BaseSettings):
 
     # API settings
     api_prefix: str = "/api"
-    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    # Allow common dev ports (3000-3010) for flexibility when ports are in use
+    cors_origins: str = ",".join([
+        f"http://localhost:{port}" for port in range(3000, 3011)
+    ] + [
+        f"http://127.0.0.1:{port}" for port in range(3000, 3011)
+    ])
 
     # File settings
     upload_dir: str = "uploads"

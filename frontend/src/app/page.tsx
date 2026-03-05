@@ -4,15 +4,14 @@ import { useState, useEffect } from 'react'
 import { Header } from '@/components/Header'
 import { PromptInput } from '@/components/PromptInput'
 import { FileUpload } from '@/components/FileUpload'
-import { ModeSelector } from '@/components/ModeSelector'
-import { DurationSelector } from '@/components/DurationSelector'
+import { DurationDropdown } from '@/components/DurationDropdown'
 import { ProgressTracker } from '@/components/ProgressTracker'
 import { OutputPlayer } from '@/components/OutputPlayer'
 import { TrailerPreview } from '@/components/TrailerPreview'
 import { useGeneration } from '@/hooks/useGeneration'
 import { suggestTopic } from '@/lib/api'
 import { STORAGE_KEYS } from '@/lib/constants'
-import { PipelineMode, DurationOption } from '@/types'
+import { PipelineMode, DurationOption, ProgressResponse } from '@/types'
 
 /**
  * Collapsible section component for stacked card layout.
@@ -64,6 +63,57 @@ function formatErrorMessage(error: string): { title: string; message: string } {
 }
 
 /**
+ * Generating view shown during podcast creation.
+ * Displays prompt, progress tracker, trailer preview, and cancel button.
+ */
+function GeneratingView({
+  prompt,
+  progress,
+  trailer,
+  showTrailer,
+  onCancel,
+}: {
+  prompt: string
+  progress: ProgressResponse | null
+  trailer: { url: string; duration_seconds: number } | null
+  showTrailer: boolean
+  onCancel: () => void
+}) {
+  return (
+    <div className="card text-center py-10 px-6 animate-slide-in-up">
+      {/* Topic being generated */}
+      <p className="text-sm text-muted-foreground mb-2">Creating podcast...</p>
+      <h2 className="text-lg font-medium mb-8 max-w-md mx-auto text-foreground">
+        &ldquo;{prompt || 'Uploaded content'}&rdquo;
+      </h2>
+
+      {/* Progress Tracker */}
+      {progress && <ProgressTracker progress={progress} />}
+
+      {/* Trailer Preview (when ready) */}
+      {trailer && showTrailer && (
+        <div className="mt-6">
+          <TrailerPreview
+            trailerUrl={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${trailer.url}`}
+            duration={trailer.duration_seconds}
+            isFullReady={false}
+            onViewFull={() => {}}
+          />
+        </div>
+      )}
+
+      {/* Cancel Button */}
+      <button
+        className="btn-outline mt-8 px-8"
+        onClick={onCancel}
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
+/**
  * Main podcast generation page.
  *
  * Suno AI-inspired centered stacked card layout with collapsible sections.
@@ -73,7 +123,8 @@ export default function Home() {
   const [prompt, setPrompt] = useState('')
   const [guidance, setGuidance] = useState('')
   const [mode, setMode] = useState<PipelineMode>('normal')
-  const [duration, setDuration] = useState<DurationOption>('auto')
+  const [duration, setDuration] = useState<DurationOption>(5)
+  const [conversationalStyle, setConversationalStyle] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
   const [isSuggestingTopic, setIsSuggestingTopic] = useState(false)
 
@@ -102,6 +153,7 @@ export default function Home() {
         if (data.guidance) setGuidance(data.guidance)
         if (data.mode) setMode(data.mode)
         if (data.duration) setDuration(data.duration)
+        if (data.conversational_style !== undefined) setConversationalStyle(data.conversational_style)
       } catch {
         // Ignore invalid JSON
       }
@@ -123,6 +175,7 @@ export default function Home() {
       mode,
       // Only pass duration if not 'auto' - backend will extract from prompt or use default
       target_duration_minutes: duration !== 'auto' ? duration : undefined,
+      conversational_style: conversationalStyle,
     })
   }
 
@@ -137,7 +190,8 @@ export default function Home() {
   const handleReset = () => {
     setPrompt('')
     setGuidance('')
-    setDuration('auto')
+    setDuration(5)
+    setConversationalStyle(false)
     setUploadedFiles([])
     setShowTrailer(true)
     reset()
@@ -180,9 +234,9 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Generation Form */}
-        {!isComplete && (
-          <div className="space-y-5 animate-in">
+        {/* Form View - shown when not generating and not complete */}
+        {!isGenerating && !isComplete && (
+          <div className="space-y-5 animate-slide-in-up">
             {/* Stacked Card */}
             <div className="card">
               {/* Section: Describe your podcast */}
@@ -192,57 +246,89 @@ export default function Home() {
                     value={prompt}
                     onChange={setPrompt}
                     placeholder="The history of electronic music, AI breakthroughs in 2025..."
-                    disabled={isGenerating}
+                    disabled={false}
                   />
-                  <button
-                    className="absolute top-2 right-2 p-1.5 rounded-md hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    onClick={handleSuggestTopic}
-                    disabled={isGenerating || isSuggestingTopic}
-                    aria-label="Suggest a topic"
-                    title="Suggest a topic"
-                  >
-                    <svg
-                      className={`w-5 h-5 text-amber-400 ${isSuggestingTopic ? 'animate-spin' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
+                  {/* Inline controls at bottom of textarea */}
+                  <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
+                    {/* Left: Mode and Style toggles */}
+                    <div className="flex items-center gap-2">
+                      {/* Mode Toggle */}
+                      <button
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors
+                          ${mode === 'pro'
+                            ? 'text-purple-400 bg-purple-400/10'
+                            : 'text-muted-foreground bg-secondary/80 hover:bg-secondary hover:text-foreground'
+                          }`}
+                        onClick={() => setMode(mode === 'normal' ? 'pro' : 'normal')}
+                        title={mode === 'normal'
+                          ? "Normal mode: Fast generation (~2 min). Click for Pro mode."
+                          : "Pro mode: Higher quality (~6 min). Click for Normal mode."}
+                      >
+                        {mode === 'normal' ? 'Normal' : 'Pro'}
+                      </button>
+                      {/* Multiple Hosts Toggle */}
+                      <button
+                        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors
+                          ${conversationalStyle
+                            ? 'text-cyan-400 bg-cyan-400/10'
+                            : 'text-muted-foreground bg-secondary/80 hover:bg-secondary hover:text-foreground'
+                          }`}
+                        onClick={() => setConversationalStyle(!conversationalStyle)}
+                        aria-label="Toggle multiple hosts"
+                        aria-pressed={conversationalStyle}
+                        title={conversationalStyle
+                          ? "Multiple hosts: ON (dynamic multi-host dialogue)"
+                          : "Multiple hosts: OFF (click to enable multi-host format)"}
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        <span className="hidden sm:inline">Multiple Hosts</span>
+                      </button>
+                      {/* Duration Dropdown */}
+                      <DurationDropdown
+                        duration={duration}
+                        onDurationChange={setDuration}
+                        disabled={false}
                       />
-                    </svg>
-                  </button>
+                    </div>
+                    {/* Right: Suggest Topic */}
+                    <button
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={handleSuggestTopic}
+                      disabled={isSuggestingTopic}
+                      aria-label="Suggest a topic"
+                      title="Suggest a topic"
+                    >
+                      <svg
+                        className={`w-4 h-4 text-amber-400 ${isSuggestingTopic ? 'animate-spin' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
+                        />
+                      </svg>
+                      <span className="hidden sm:inline text-muted-foreground">Inspire me</span>
+                    </button>
+                  </div>
                 </div>
               </Section>
 
-              {/* Section: Style & Mode */}
-              <Section title="Style & Mode" defaultOpen={true}>
-                <div className="space-y-4">
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g., For beginners, Technical deep-dive, Casual tone..."
-                    value={guidance}
-                    onChange={(e) => setGuidance(e.target.value)}
-                    disabled={isGenerating}
-                  />
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground">Mode</span>
-                    <ModeSelector
-                      mode={mode}
-                      onModeChange={setMode}
-                      disabled={isGenerating}
-                    />
-                  </div>
-                  <DurationSelector
-                    duration={duration}
-                    onDurationChange={setDuration}
-                    disabled={isGenerating}
-                  />
-                </div>
+              {/* Section: Style */}
+              <Section title="Style" defaultOpen={true}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., For beginners, Technical deep-dive, Casual tone..."
+                  value={guidance}
+                  onChange={(e) => setGuidance(e.target.value)}
+                />
               </Section>
 
               {/* Section: Upload Files — collapsed by default */}
@@ -251,31 +337,19 @@ export default function Home() {
                   onFileUploaded={handleFileUploaded}
                   onFileRemoved={handleFileRemoved}
                   uploadedFiles={uploadedFiles}
-                  disabled={isGenerating}
+                  disabled={false}
                 />
               </Section>
             </div>
 
             {/* Create Button */}
-            {!isGenerating && (
-              <button
-                className="btn-create"
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-              >
-                Create Podcast
-              </button>
-            )}
-
-            {/* Cancel Button */}
-            {isGenerating && (
-              <button
-                className="btn-outline w-full py-3"
-                onClick={cancelGeneration}
-              >
-                Cancel
-              </button>
-            )}
+            <button
+              className="btn-create"
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+            >
+              Create Podcast
+            </button>
 
             {/* Error Message */}
             {hasFailed && error && (() => {
@@ -310,23 +384,15 @@ export default function Home() {
           </div>
         )}
 
-        {/* Progress Tracker */}
-        {isGenerating && progress && (
-          <div className="mt-6 animate-in">
-            <ProgressTracker progress={progress} />
-          </div>
-        )}
-
-        {/* Trailer Preview - shows while full podcast is generating */}
-        {trailer && showTrailer && !result && isGenerating && (
-          <div className="mt-6 animate-in">
-            <TrailerPreview
-              trailerUrl={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${trailer.url}`}
-              duration={trailer.duration_seconds}
-              isFullReady={!!result}
-              onViewFull={() => setShowTrailer(false)}
-            />
-          </div>
+        {/* Generating View - slides in when generation starts */}
+        {isGenerating && (
+          <GeneratingView
+            prompt={prompt}
+            progress={progress}
+            trailer={trailer}
+            showTrailer={showTrailer}
+            onCancel={cancelGeneration}
+          />
         )}
 
         {/* Output Player */}

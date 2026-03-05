@@ -14,7 +14,7 @@ from typing import Dict, Optional, Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from pipelines.normal_pipeline import NormalPipeline
-from pipelines.pro_pipeline import ProPipeline, ProConfig
+from pipelines.pro_pipeline import ProPipeline, ProConfig, UltraConfig
 from utils.progress_stream import ProgressStream
 from utils.smart_input_handler import SmartInputHandler, SmartInput
 
@@ -176,7 +176,12 @@ class PipelineService:
         )
 
         try:
-            if request.mode == "pro":
+            if request.mode == "ultra":
+                result = await asyncio.wait_for(
+                    self._run_ultra_pipeline(job_id, content, request),
+                    timeout=pipeline_timeout,
+                )
+            elif request.mode == "pro":
                 result = await asyncio.wait_for(
                     self._run_pro_pipeline(job_id, content, request),
                     timeout=pipeline_timeout,
@@ -333,6 +338,11 @@ class PipelineService:
                 preview=content.text[:200] if content.text else None,
             )
 
+            # Pass conversational_style flag to downstream pipeline
+            if content.metadata is None:
+                content.metadata = {}
+            content.metadata["conversational_style"] = request.conversational_style
+
             return content
 
         except Exception as e:
@@ -374,10 +384,10 @@ class PipelineService:
         try:
             trailer_service = TrailerService(job_id, self.output_dir)
 
-            # Hard timeout to ensure trailer doesn't run past main pipeline
+            # Timeout for trailer generation (TTS ~15-20s + image ~5s + mix ~2s)
             result = await asyncio.wait_for(
                 trailer_service.generate_trailer(script),
-                timeout=20.0
+                timeout=45.0
             )
 
             if result.success:
@@ -558,7 +568,8 @@ class PipelineService:
             # Get adapter while still in async context (thread-safe for sync callbacks)
             adapter = await adapter_manager.get_adapter(job_id)
             progress_callback = self._create_progress_callback(job_id, adapter)
-            progress = ProgressStream(callback=progress_callback)
+            # Initialize progress stream in Pro mode for correct phase weights
+            progress = ProgressStream(callback=progress_callback, mode="pro")
 
             # Create trailer callback for fire-and-forget trailer generation
             on_script_ready = self._create_on_script_ready_callback(job_id)
@@ -579,6 +590,85 @@ class PipelineService:
 
         except Exception as e:
             logger.error("Pro pipeline failed: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _run_ultra_pipeline(
+        self,
+        job_id: str,
+        content: Any,
+        request: GenerationRequest,
+    ) -> Optional[Dict]:
+        """
+        Run the Ultra pipeline.
+
+        Ultra mode uses the ProPipeline with UltraConfig for premium quality:
+        - Full director review loop (3 rounds)
+        - 16 narrative images
+        - 9-segment daisy-chain BGM
+        - VAD-based ducking
+
+        Args:
+            job_id: Job identifier for progress updates.
+            content: Prepared content.
+            request: Original request with config.
+
+        Returns:
+            Pipeline result dictionary.
+        """
+        try:
+            # Create UltraConfig (with overrides from request)
+            config = UltraConfig()
+            if request.config:
+                config = UltraConfig.from_dict(request.config)
+
+            # Get adapter while still in async context (thread-safe for sync callbacks)
+            adapter = await adapter_manager.get_adapter(job_id)
+            progress_callback = self._create_progress_callback(job_id, adapter)
+            # Initialize progress stream in Ultra mode for correct phase weights
+            progress = ProgressStream(callback=progress_callback, mode="ultra")
+
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
+            # Run pipeline with UltraConfig (ProPipeline accepts both ProConfig and UltraConfig)
+            # Convert UltraConfig to ProConfig-compatible for pipeline execution
+            pro_config = ProConfig(
+                director_review=config.director_review,
+                max_review_rounds=config.max_review_rounds,
+                approval_threshold=config.approval_threshold,
+                voice_preset=config.voice_preset,
+                apply_voice_styles=config.apply_voice_styles,
+                custom_pronunciations=config.custom_pronunciations,
+                music_genre=config.music_genre,
+                bgm_segments=config.bgm_segments,
+                daisy_chain=config.daisy_chain,
+                bgm_intelligent=config.bgm_intelligent,
+                image_count=config.image_count,
+                image_style=config.image_style,
+                tts_sentence_level=config.tts_sentence_level,
+                vad_ducking=config.vad_ducking,
+                speaker_format=config.speaker_format,
+                manual_speakers=config.manual_speakers,
+                voice_overrides=config.voice_overrides,
+                emotion_voice_sync=config.emotion_voice_sync,
+                emotion_image_alignment=config.emotion_image_alignment,
+                emotion_validation=config.emotion_validation,
+            )
+            pipeline = ProPipeline(config=pro_config)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready
+            )
+
+            return self._convert_result_to_dict(
+                result,
+                include_review_history=True,
+                config=pro_config,
+            )
+
+        except Exception as e:
+            logger.error("Ultra pipeline failed: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     async def cancel_job(self, job_id: str) -> None:

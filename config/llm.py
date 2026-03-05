@@ -6,13 +6,13 @@ Configuration for Large Language Model usage in the podcast enhancement system.
 """
 
 # Default Claude model for script enhancement
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 # Model options
 MODEL_OPTIONS = {
-    "sonnet": "claude-sonnet-4-20250514",
-    "opus": "claude-opus-4-5-20250514",
-    "haiku": "claude-3-5-haiku-20241022",
+    "sonnet": "claude-sonnet-4-6",
+    "opus": "claude-opus-4-6",
+    "haiku": "claude-haiku-4-5-20251001",
 }
 
 # Default parameters for LLM calls

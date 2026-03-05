@@ -21,6 +21,9 @@ import type {
   MessageResponse,
   HistoryResponse,
   TranscriptionResponse,
+  UserMemoryPreferences,
+  AdaptiveThresholdData,
+  JobLogs,
 } from '@/types'
 
 // API base URL from environment
@@ -168,6 +171,16 @@ export async function listJobs(
     params.append('status', status)
   }
   return request<JobListResponse>(`/api/pipelines/?${params}`)
+}
+
+/**
+ * Get execution logs for a job.
+ *
+ * @param jobId - Job identifier
+ * @returns Job logs response
+ */
+export async function getJobLogs(jobId: string): Promise<JobLogs> {
+  return request<JobLogs>(`/api/pipelines/${jobId}/logs`)
 }
 
 // =============================================================================
@@ -456,4 +469,157 @@ export async function getInteractiveSessionInfo(
     }
     throw e
   }
+}
+
+// =============================================================================
+// User Memory Endpoints
+// =============================================================================
+
+/**
+ * Memory consent response from the API.
+ */
+interface ConsentResponse {
+  user_id: string
+  granted: boolean
+  granted_at: string | null
+  scope: string[]
+}
+
+/**
+ * User profile response from the API.
+ */
+interface ProfileResponse {
+  user_id: string
+  display_name: string | null
+  communication_style: {
+    verbosity: 'concise' | 'balanced' | 'detailed'
+    tone: 'casual' | 'professional' | 'friendly'
+    use_analogies: boolean
+    technical_depth: 'beginner' | 'intermediate' | 'expert'
+  }
+  interests: string[]
+  expertise_areas: string[]
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Thresholds response from the API.
+ */
+interface ThresholdsResponse {
+  user_id: string
+  silence_threshold_ms: number
+  false_positive_rate: number
+  total_interactions: number
+  is_personalized: boolean
+}
+
+/**
+ * Get memory consent status for a user.
+ *
+ * @param userId - Optional user ID
+ * @returns Consent response
+ */
+export async function getMemoryConsent(userId?: string): Promise<ConsentResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ConsentResponse>(`/api/user/consent${params}`)
+}
+
+/**
+ * Update memory consent for a user.
+ *
+ * @param granted - Whether consent is granted
+ * @param scope - Types of memory allowed
+ * @param userId - Optional user ID
+ * @returns Updated consent response
+ */
+export async function updateMemoryConsent(
+  granted: boolean,
+  scope?: string[],
+  userId?: string
+): Promise<ConsentResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ConsentResponse>(`/api/user/consent${params}`, {
+    method: 'POST',
+    body: JSON.stringify({ granted, scope }),
+  })
+}
+
+/**
+ * Get user profile.
+ *
+ * @param userId - Optional user ID
+ * @returns Profile response
+ */
+export async function getUserProfile(userId?: string): Promise<ProfileResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ProfileResponse>(`/api/user/profile${params}`)
+}
+
+/**
+ * Update user profile.
+ *
+ * @param updates - Profile fields to update
+ * @param userId - Optional user ID
+ * @returns Updated profile response
+ */
+export async function updateUserProfile(
+  updates: Partial<{
+    display_name: string
+    communication_style: ProfileResponse['communication_style']
+    interests: string[]
+    expertise_areas: string[]
+  }>,
+  userId?: string
+): Promise<ProfileResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ProfileResponse>(`/api/user/profile${params}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  })
+}
+
+/**
+ * Get adaptive voice thresholds.
+ *
+ * @param userId - Optional user ID
+ * @returns Thresholds response
+ */
+export async function getVoiceThresholds(userId?: string): Promise<ThresholdsResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ThresholdsResponse>(`/api/user/thresholds${params}`)
+}
+
+/**
+ * Update adaptive voice thresholds.
+ *
+ * @param updates - Threshold updates
+ * @param userId - Optional user ID
+ * @returns Updated thresholds response
+ */
+export async function updateVoiceThresholds(
+  updates: {
+    silence_threshold_ms?: number
+    pause_sample?: number
+    false_positive?: boolean
+  },
+  userId?: string
+): Promise<ThresholdsResponse> {
+  const params = userId ? `?user_id=${userId}` : ''
+  return request<ThresholdsResponse>(`/api/user/thresholds${params}`, {
+    method: 'POST',
+    body: JSON.stringify(updates),
+  })
+}
+
+/**
+ * Clear all user memory.
+ *
+ * @param userId - Optional user ID
+ */
+export async function clearUserMemory(userId?: string): Promise<void> {
+  const params = userId ? `?user_id=${userId}` : ''
+  await request<{ message: string }>(`/api/user/memory${params}`, {
+    method: 'DELETE',
+  })
 }

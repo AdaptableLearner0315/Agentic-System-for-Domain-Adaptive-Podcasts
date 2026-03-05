@@ -33,11 +33,13 @@ class PipelineMode(str, Enum):
     Pipeline execution mode.
 
     Attributes:
-        NORMAL: Fast generation (~2 minutes), suitable for quick previews
-        PRO: High-quality generation (~6 minutes), full features enabled
+        NORMAL: Fast generation (~1-2 minutes), suitable for quick previews
+        PRO: Balanced quality/speed (~2-3 minutes), 8 images, no director review
+        ULTRA: Premium quality (~5-8 minutes), full features with director review
     """
     NORMAL = "normal"
     PRO = "pro"
+    ULTRA = "ultra"
 
 
 class GenerationPhase(str, Enum):
@@ -49,8 +51,13 @@ class GenerationPhase(str, Enum):
         MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
 
     Pro mode phases execute in order:
-        INITIALIZING -> ANALYZING -> SCRIPTING ->
+        INITIALIZING -> ANALYZING -> SCRIPTING -> VALIDATING ->
         GENERATING_TTS -> GENERATING_BGM -> GENERATING_IMAGES ->
+        MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
+
+    Ultra mode phases execute in order:
+        INITIALIZING -> ANALYZING -> SCRIPTING -> DIRECTOR_REVIEW ->
+        VALIDATING -> GENERATING_TTS -> GENERATING_BGM -> GENERATING_IMAGES ->
         MIXING_AUDIO -> ASSEMBLING_VIDEO -> COMPLETE
 
     ERROR can occur at any point and terminates the job.
@@ -59,9 +66,11 @@ class GenerationPhase(str, Enum):
         INITIALIZING: Setting up the pipeline
         ANALYZING: Analyzing input content
         SCRIPTING: Enhancing script with emotional arcs
-        GENERATING_TTS: Creating text-to-speech audio (Pro mode)
-        GENERATING_BGM: Creating background music (Pro mode)
-        GENERATING_IMAGES: Creating narrative images (Pro mode)
+        DIRECTOR_REVIEW: Director review loop (Ultra mode only, 45-90s)
+        VALIDATING: Emotion validation + speaker assignment (Pro/Ultra only)
+        GENERATING_TTS: Creating text-to-speech audio (Pro/Ultra)
+        GENERATING_BGM: Creating background music (Pro/Ultra)
+        GENERATING_IMAGES: Creating narrative images (Pro/Ultra)
         GENERATING_ASSETS: Parallel TTS + BGM + image generation (Normal mode).
             Replaces the three separate phases with a single unified phase
             that tracks sub-progress for each component via details.parallel_status.
@@ -73,6 +82,8 @@ class GenerationPhase(str, Enum):
     INITIALIZING = "initializing"
     ANALYZING = "analyzing"
     SCRIPTING = "scripting"
+    DIRECTOR_REVIEW = "director_review"
+    VALIDATING = "validating"
     GENERATING_TTS = "generating_tts"
     GENERATING_BGM = "generating_bgm"
     GENERATING_IMAGES = "generating_images"

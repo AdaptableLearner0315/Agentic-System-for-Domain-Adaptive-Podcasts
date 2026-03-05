@@ -16,12 +16,10 @@ load_dotenv()
 
 from agents.script_enhancer import ScriptEnhancer
 from agents.director import Director
+from config.llm import MODEL_OPTIONS
 
-# Model mapping
-MODELS = {
-    "sonnet": "claude-sonnet-4-20250514",
-    "opus": "claude-opus-4-20250514"
-}
+# Model mapping - uses centralized config
+MODELS = MODEL_OPTIONS
 
 
 def load_transcript(path: str) -> str:

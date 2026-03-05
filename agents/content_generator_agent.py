@@ -13,6 +13,7 @@ Supports three generation modes:
 
 from typing import Optional, Dict, Any
 from agents.base_agent import BaseAgent
+from config.llm import MODEL_OPTIONS
 
 
 class ContentGeneratorAgent(BaseAgent):
@@ -44,13 +45,15 @@ class ContentGeneratorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = None):
         """
         Initialize the Content Generator Agent.
 
         Args:
-            model: LLM model to use for content generation
+            model: LLM model to use for content generation (default: sonnet from config)
         """
+        if model is None:
+            model = MODEL_OPTIONS["sonnet"]
         super().__init__(
             name="ContentGenerator",
             output_category="",  # Root output directory

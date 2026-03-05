@@ -12,9 +12,9 @@ interface ModeSelectorProps {
 }
 
 /**
- * Compact pill toggle for Normal/Pro pipeline modes.
+ * Compact pill toggle for Normal/Pro/Ultra pipeline modes.
  *
- * Suno AI-style toggle with two options inside a rounded container.
+ * Suno AI-style toggle with three options inside a rounded container.
  *
  * @param mode - Currently selected mode
  * @param onModeChange - Mode change handler
@@ -27,7 +27,8 @@ export function ModeSelector({
 }: ModeSelectorProps) {
   const options = [
     { id: 'normal' as PipelineMode, label: 'Normal', sub: '~2 min' },
-    { id: 'pro' as PipelineMode, label: 'Pro', sub: '~6 min' },
+    { id: 'pro' as PipelineMode, label: 'Pro', sub: '~3 min' },
+    { id: 'ultra' as PipelineMode, label: 'Ultra', sub: '~6 min' },
   ]
 
   return (
@@ -43,7 +44,7 @@ export function ModeSelector({
           <button
             key={opt.id}
             className={`
-              relative px-5 py-2 rounded-full text-sm font-medium transition-all duration-200
+              relative px-4 py-2 rounded-full text-sm font-medium transition-all duration-200
               ${isSelected
                 ? 'bg-primary text-primary-foreground shadow-md'
                 : 'text-muted-foreground hover:text-foreground'
@@ -53,7 +54,7 @@ export function ModeSelector({
             disabled={disabled}
           >
             {opt.label}
-            <span className={`ml-1.5 text-xs ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
+            <span className={`ml-1 text-xs ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
               {opt.sub}
             </span>
           </button>

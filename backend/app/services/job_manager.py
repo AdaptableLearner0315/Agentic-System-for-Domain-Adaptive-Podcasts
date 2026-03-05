@@ -21,6 +21,8 @@ from ..models.responses import (
     ProgressResponse,
     ResultResponse,
     AssetInfo,
+    JobLogsResponse,
+    LogEntry,
 )
 from ..logging_config import get_logger
 from ..constants import JOB_ID_LENGTH
@@ -460,6 +462,132 @@ class JobManager:
                 job_id for job_id, job in self._jobs.items()
                 if job.status == JobStatus.RUNNING
             ]
+
+    def get_job_logs(self, job_id: str) -> Optional[JobLogsResponse]:
+        """
+        Build execution logs from job progress and state.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            JobLogsResponse with logs if job exists, None otherwise.
+        """
+        with self._lock:
+            job_state = self._jobs.get(job_id)
+            if not job_state:
+                return None
+
+            logs: List[LogEntry] = []
+
+            # Log job creation
+            logs.append(LogEntry(
+                timestamp=job_state.created_at.isoformat(),
+                level="INFO",
+                message=f"Job created in {job_state.mode.value} mode",
+                phase="initializing",
+            ))
+
+            if job_state.prompt:
+                prompt_preview = (
+                    job_state.prompt[:100] + "..."
+                    if len(job_state.prompt) > 100
+                    else job_state.prompt
+                )
+                logs.append(LogEntry(
+                    timestamp=job_state.created_at.isoformat(),
+                    level="INFO",
+                    message=f"Prompt: {prompt_preview}",
+                    phase="initializing",
+                ))
+
+            # Log job start
+            if job_state.started_at:
+                logs.append(LogEntry(
+                    timestamp=job_state.started_at.isoformat(),
+                    level="INFO",
+                    message="Job started",
+                    phase="initializing",
+                ))
+
+            # Log progress updates
+            if job_state.progress:
+                progress = job_state.progress
+                phase = progress.get("phase")
+                message = progress.get("message", "")
+                progress_pct = progress.get("progress_percent", 0)
+                elapsed = progress.get("elapsed_seconds", 0)
+
+                # Create a timestamp based on start time + elapsed
+                if job_state.started_at:
+                    from datetime import timedelta
+                    progress_time = job_state.started_at + timedelta(seconds=elapsed)
+                    logs.append(LogEntry(
+                        timestamp=progress_time.isoformat(),
+                        level="INFO",
+                        message=f"[{progress_pct:.0f}%] {message}",
+                        phase=phase.value if hasattr(phase, 'value') else str(phase),
+                    ))
+
+                # Log any details
+                details = progress.get("details", {})
+                if details:
+                    # Log parallel asset status if available
+                    for key, value in details.items():
+                        if isinstance(value, dict) and "done" in value:
+                            done = value.get("done", 0)
+                            total = value.get("total", 0)
+                            if total > 0:
+                                logs.append(LogEntry(
+                                    timestamp=progress_time.isoformat() if job_state.started_at else job_state.created_at.isoformat(),
+                                    level="INFO",
+                                    message=f"{key}: {done}/{total} completed",
+                                    phase=phase.value if hasattr(phase, 'value') else str(phase),
+                                ))
+
+            # Log completion or failure
+            if job_state.completed_at:
+                if job_state.status == JobStatus.COMPLETED:
+                    logs.append(LogEntry(
+                        timestamp=job_state.completed_at.isoformat(),
+                        level="INFO",
+                        message="Job completed successfully",
+                        phase="complete",
+                    ))
+                    if job_state.result:
+                        duration = job_state.result.get("duration_seconds")
+                        if duration:
+                            logs.append(LogEntry(
+                                timestamp=job_state.completed_at.isoformat(),
+                                level="INFO",
+                                message=f"Output duration: {duration:.1f} seconds",
+                                phase="complete",
+                            ))
+                elif job_state.status == JobStatus.FAILED:
+                    logs.append(LogEntry(
+                        timestamp=job_state.completed_at.isoformat(),
+                        level="ERROR",
+                        message=f"Job failed: {job_state.error or 'Unknown error'}",
+                        phase="error",
+                    ))
+                elif job_state.status == JobStatus.CANCELLED:
+                    logs.append(LogEntry(
+                        timestamp=job_state.completed_at.isoformat(),
+                        level="WARNING",
+                        message="Job cancelled by user",
+                        phase="error",
+                    ))
+
+            return JobLogsResponse(
+                job_id=job_id,
+                status=job_state.status.value,
+                mode=job_state.mode.value,
+                created_at=job_state.created_at.isoformat(),
+                started_at=job_state.started_at.isoformat() if job_state.started_at else None,
+                completed_at=job_state.completed_at.isoformat() if job_state.completed_at else None,
+                error=job_state.error,
+                logs=logs,
+            )
 
     def list_jobs(
         self,

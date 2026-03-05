@@ -22,6 +22,9 @@ Legacy agents (for backwards compatibility):
 - MusicGenerator: Original music generator
 """
 
+# Config
+from config.llm import MODEL_OPTIONS
+
 # Base agent
 from agents.base_agent import BaseAgent
 
@@ -116,7 +119,7 @@ def create_agent(agent_type: str, **kwargs):
         Agent instance
 
     Example:
-        director = create_agent('director', model='claude-opus-4-5-20250514')
+        director = create_agent('director', model=MODEL_OPTIONS['opus'])
     """
     agent_map = {
         # New agents
@@ -149,12 +152,12 @@ def create_agent(agent_type: str, **kwargs):
     return agent_map[agent_type_lower](**kwargs)
 
 
-def get_all_agents(model: str = "claude-opus-4-5-20250514") -> dict:
+def get_all_agents(model: str = None) -> dict:
     """
     Create instances of all main agents.
 
     Args:
-        model: LLM model to use for agents that require it
+        model: LLM model to use for agents that require it (default: opus from config)
 
     Returns:
         Dictionary of agent name -> agent instance
@@ -163,6 +166,8 @@ def get_all_agents(model: str = "claude-opus-4-5-20250514") -> dict:
         agents = get_all_agents()
         script = agents['script_designer'].enhance(transcript)
     """
+    if model is None:
+        model = MODEL_OPTIONS["opus"]
     return {
         'script_designer': ScriptDesignerAgent(model=model),
         'director': DirectorAgent(model=model),

@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { useInteractiveChat } from '@/hooks/useInteractiveChat'
+import { VoiceExperience, MemoryConsentModal, useMemoryConsent } from '@/components/voice'
 import type { ChatMessage as ChatMessageType, StreamingMessage } from '@/types'
 
 interface ChatPanelProps {
@@ -55,6 +56,13 @@ export function ChatPanel({
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
+  // Voice mode state
+  const [voiceMode, setVoiceMode] = useState(false)
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false)
+
+  // Memory consent
+  const { showModal, setShowModal, handleConsent } = useMemoryConsent()
+
   // Start session when panel becomes visible
   useEffect(() => {
     if (isVisible && jobId && !sessionId) {
@@ -100,6 +108,7 @@ export function ChatPanel({
     // If clicking the same message that's playing, stop it
     if (playingMessageId === messageId) {
       setPlayingMessageId(null)
+      setIsAiSpeaking(false)
       return
     }
 
@@ -107,11 +116,23 @@ export function ChatPanel({
     const audio = new Audio(url)
     audioRef.current = audio
 
-    audio.onplay = () => setPlayingMessageId(messageId)
-    audio.onended = () => setPlayingMessageId(null)
-    audio.onerror = () => setPlayingMessageId(null)
+    audio.onplay = () => {
+      setPlayingMessageId(messageId)
+      setIsAiSpeaking(true)
+    }
+    audio.onended = () => {
+      setPlayingMessageId(null)
+      setIsAiSpeaking(false)
+    }
+    audio.onerror = () => {
+      setPlayingMessageId(null)
+      setIsAiSpeaking(false)
+    }
 
-    audio.play().catch(() => setPlayingMessageId(null))
+    audio.play().catch(() => {
+      setPlayingMessageId(null)
+      setIsAiSpeaking(false)
+    })
   }, [playingMessageId])
 
   /**
@@ -123,6 +144,25 @@ export function ChatPanel({
     }
     onClose?.()
   }, [onClose])
+
+  /**
+   * Stop audio playback.
+   */
+  const handleStopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    setPlayingMessageId(null)
+    setIsAiSpeaking(false)
+  }, [])
+
+  /**
+   * Toggle voice mode.
+   */
+  const toggleVoiceMode = useCallback(() => {
+    setVoiceMode((prev) => !prev)
+  }, [])
 
   if (!isVisible) return null
 
@@ -141,25 +181,54 @@ export function ChatPanel({
           />
           <h3 className="font-medium text-sm">Chat with Podcast</h3>
         </div>
-        <button
-          className="p-1 rounded hover:bg-secondary transition-colors"
-          onClick={handleClose}
-          aria-label="Close chat"
-        >
-          <svg
-            className="w-5 h-5 text-muted-foreground"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="flex items-center gap-2">
+          {/* Voice mode toggle */}
+          {enableVoice && (
+            <button
+              className={`p-1.5 rounded transition-colors ${
+                voiceMode
+                  ? 'bg-primary/20 text-primary'
+                  : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={toggleVoiceMode}
+              aria-label={voiceMode ? 'Switch to text mode' : 'Switch to voice mode'}
+              title={voiceMode ? 'Text mode' : 'Voice mode'}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              </svg>
+            </button>
+          )}
+          <button
+            className="p-1 rounded hover:bg-secondary transition-colors"
+            onClick={handleClose}
+            aria-label="Close chat"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
+            <svg
+              className="w-5 h-5 text-muted-foreground"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Error banner */}
@@ -243,17 +312,46 @@ export function ChatPanel({
       </div>
 
       {/* Input */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={!isConnected || isLoading}
-        showVoiceInput={enableVoice}
-        placeholder={
-          !isConnected
-            ? 'Connecting...'
-            : isLoading
-            ? 'Waiting for response...'
-            : 'Ask about the podcast...'
-        }
+      {voiceMode && enableVoice ? (
+        <div className="p-3 border-t border-border bg-background">
+          <VoiceExperience
+            jobId={jobId}
+            onSend={handleSend}
+            onInteraction={onInteraction}
+            disabled={!isConnected || isLoading}
+            isConnecting={!isConnected}
+            aiResponseText={streamingMessage?.content}
+            isAiProcessing={isLoading}
+            isAiSpeaking={isAiSpeaking}
+            onStopAudio={handleStopAudio}
+            layout="compact"
+          />
+        </div>
+      ) : (
+        <ChatInput
+          onSend={handleSend}
+          disabled={!isConnected || isLoading}
+          isConnecting={!isConnected}
+          showVoiceInput={enableVoice && !voiceMode}
+          jobId={jobId}
+          onInteraction={onInteraction}
+          placeholder={
+            !isConnected
+              ? 'Connecting...'
+              : isLoading
+              ? 'Waiting for response...'
+              : enableVoice
+              ? 'Type or tap mic to speak...'
+              : 'Ask about the podcast...'
+          }
+        />
+      )}
+
+      {/* Memory Consent Modal */}
+      <MemoryConsentModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        onConsent={handleConsent}
       />
     </div>
   )

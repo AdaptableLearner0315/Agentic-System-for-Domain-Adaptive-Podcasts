@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from agents.base_agent import BaseAgent
+from config.llm import MODEL_OPTIONS
 from config.speaker_config import (
     SPEAKER_FORMATS,
     AVAILABLE_VOICES,
@@ -56,13 +57,15 @@ class SpeakerAssignmentAgent(BaseAgent):
     - Manual override support
     """
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = None):
         """
         Initialize the Speaker Assignment Agent.
 
         Args:
-            model: LLM model for complex assignments
+            model: LLM model for complex assignments (default: sonnet from config)
         """
+        if model is None:
+            model = MODEL_OPTIONS["sonnet"]
         super().__init__(
             name="SpeakerAssignment",
             output_category="",

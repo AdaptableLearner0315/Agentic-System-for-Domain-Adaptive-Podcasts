@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { ProgressResponse, GenerationPhase, PhaseTimings, ParallelStatus } from '@/types'
+import { ProgressResponse, GenerationPhase, PhaseTimings, ParallelStatus, DurationHint, DirectorReviewDetails } from '@/types'
 
 interface ProgressTrackerProps {
   /** Current progress data */
@@ -92,7 +92,20 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
   // Extract parallel sub-progress from details
   const parallelStatus = (progress.details as Record<string, unknown> | undefined)?.parallel_status as ParallelStatus | undefined
 
-  const phases: { id: GenerationPhase; label: string; icon: string }[] = [
+  // Extract duration hint (Pro mode provides expected duration)
+  const durationHint = (progress.details as Record<string, unknown> | undefined)?.duration_hint as DurationHint | undefined
+
+  // Extract director review details (Pro mode)
+  const directorReviewDetails = (progress.details as Record<string, unknown> | undefined) as DirectorReviewDetails | undefined
+  const isDirectorReview = progress.phase === 'director_review'
+  const isValidating = progress.phase === 'validating'
+
+  // Determine if we're in Pro mode (presence of director_review phase or duration hint)
+  const isProMode = durationHint?.mode === 'pro' || isDirectorReview || isValidating ||
+    progress.phase === 'generating_tts' || progress.phase === 'generating_bgm' || progress.phase === 'generating_images'
+
+  // Phases differ between Normal and Pro mode
+  const normalPhases: { id: GenerationPhase; label: string; icon: string }[] = [
     { id: 'analyzing', label: 'Analyzing', icon: '🔍' },
     { id: 'scripting', label: 'Scripting', icon: '✍️' },
     { id: 'generating_assets', label: 'Assets', icon: '⚡' },
@@ -100,11 +113,32 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
     { id: 'assembling_video', label: 'Video', icon: '🎬' },
   ]
 
+  const proPhases: { id: GenerationPhase; label: string; icon: string }[] = [
+    { id: 'analyzing', label: 'Analyzing', icon: '🔍' },
+    { id: 'scripting', label: 'Writing', icon: '✍️' },
+    { id: 'director_review', label: 'Reviewing', icon: '🎬' },
+    { id: 'validating', label: 'Validating', icon: '✓' },
+    { id: 'generating_tts', label: 'Voice', icon: '🎙️' },
+    { id: 'mixing_audio', label: 'Mixing', icon: '🎛️' },
+    { id: 'assembling_video', label: 'Video', icon: '📹' },
+  ]
+
+  const phases = isProMode ? proPhases : normalPhases
+
   /**
    * Get the index of the current phase.
+   * Maps Pro-mode asset phases to the TTS phase for timeline display.
    */
   const getCurrentPhaseIndex = (): number => {
-    const index = phases.findIndex((p) => p.id === progress.phase)
+    let currentPhase = progress.phase
+
+    // For Pro mode, map BGM and Images phases to TTS phase index
+    // since they run in parallel
+    if (isProMode && (currentPhase === 'generating_bgm' || currentPhase === 'generating_images')) {
+      currentPhase = 'generating_tts'
+    }
+
+    const index = phases.findIndex((p) => p.id === currentPhase)
     return index >= 0 ? index : 0
   }
 
@@ -127,9 +161,12 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
     return `${mins}m ${secs}s`
   }
 
-  // Determine mode from details or phase for initial ETA
-  const isProMode = progress.details && 'config_used' in (progress.details as Record<string, unknown>)
-  const modeEstimate = isProMode ? '~4-6 minutes' : '~1-2 minutes'
+  // Determine mode estimate from duration hint if available
+  const modeEstimate = durationHint
+    ? `~${durationHint.expected_minutes_min}-${durationHint.expected_minutes_max} minutes`
+    : isProMode
+      ? '~5-8 minutes'
+      : '~1-2 minutes'
 
   const currentIndex = getCurrentPhaseIndex()
   const isComplete = progress.phase === 'complete'
@@ -229,7 +266,30 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
         })}
       </div>
 
-      {/* Parallel Asset Sub-Progress */}
+      {/* Director Review Progress (Pro mode) */}
+      {isDirectorReview && directorReviewDetails?.round !== undefined && (
+        <div className="flex justify-center">
+          <div className="badge bg-primary/20 text-primary px-4 py-2">
+            <span className="animate-pulse mr-2">🎬</span>
+            Director Review: Round {directorReviewDetails.round}/{directorReviewDetails.max_rounds}
+            {directorReviewDetails.sub_step === 'enhancing' && ' - Enhancing script...'}
+            {directorReviewDetails.sub_step === 'reviewing' && ' - Director reviewing...'}
+            {directorReviewDetails.sub_step === 'approved' && ' - Approved!'}
+          </div>
+        </div>
+      )}
+
+      {/* Validating Progress (Pro mode) */}
+      {isValidating && (
+        <div className="flex justify-center">
+          <div className="badge bg-secondary text-muted-foreground px-4 py-2">
+            <span className="mr-2">✓</span>
+            {progress.message}
+          </div>
+        </div>
+      )}
+
+      {/* Parallel Asset Sub-Progress (Normal mode) */}
       {progress.phase === 'generating_assets' && parallelStatus && (
         <div className="space-y-2">
           <div
@@ -264,6 +324,18 @@ export function ProgressTracker({ progress }: ProgressTrackerProps) {
               </p>
             ) : null
           })()}
+        </div>
+      )}
+
+      {/* Pro Mode Asset Generation Progress */}
+      {isProMode && (progress.phase === 'generating_tts' || progress.phase === 'generating_bgm' || progress.phase === 'generating_images') && progress.total_steps > 0 && (
+        <div className="flex justify-center">
+          <div className="badge bg-secondary text-muted-foreground px-4 py-2 tabular-nums">
+            {progress.phase === 'generating_tts' && '🎙️ Voice'}
+            {progress.phase === 'generating_bgm' && '🎵 Music'}
+            {progress.phase === 'generating_images' && '🖼️ Images'}
+            {' '}{progress.current_step}/{progress.total_steps}
+          </div>
         </div>
       )}
 

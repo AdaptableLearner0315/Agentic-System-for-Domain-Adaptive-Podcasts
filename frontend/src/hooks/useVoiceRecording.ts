@@ -276,6 +276,13 @@ export function useVoiceRecording(): UseVoiceRecordingReturn {
     })
   }, [cleanup])
 
+  /**
+   * Get the current MediaStream (if recording).
+   */
+  const getStream = useCallback((): MediaStream | null => {
+    return streamRef.current
+  }, [])
+
   return {
     isRecording,
     audioLevel,
@@ -285,5 +292,6 @@ export function useVoiceRecording(): UseVoiceRecordingReturn {
     stopRecording,
     requestPermission,
     error,
+    getStream,
   }
 }

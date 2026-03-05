@@ -4,16 +4,40 @@ Author: Sarath
 
 Manages concurrent API calls with rate limiting for fast generation.
 Provides async batch execution for TTS, BGM, and image generation.
+
+Features:
+- Exponential backoff with jitter for rate limit handling
+- Circuit breaker pattern to prevent cascade failures
+- Graceful degradation on partial failures
 """
 
 import asyncio
+import random
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, List, Dict, Optional, TypeVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 
 
 T = TypeVar('T')
+
+
+# Rate limit error indicators (case-insensitive matching)
+RATE_LIMIT_INDICATORS = [
+    'rate limit',
+    'rate_limit',
+    'too many requests',
+    '429',
+    'throttl',
+    'quota exceeded',
+    'capacity',
+]
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    """Check if an error is a rate limit error."""
+    error_str = str(error).lower()
+    return any(indicator in error_str for indicator in RATE_LIMIT_INDICATORS)
 
 
 @dataclass
@@ -24,6 +48,21 @@ class TaskResult:
     result: Any
     error: Optional[str] = None
     duration_ms: int = 0
+    retries: int = 0
+
+
+@dataclass
+class CircuitBreakerState:
+    """State for circuit breaker pattern."""
+    failures: int = 0
+    last_failure_time: float = 0.0
+    is_open: bool = False
+    consecutive_successes: int = 0
+
+    # Configuration
+    failure_threshold: int = 3  # Open circuit after N failures
+    recovery_timeout: float = 10.0  # Seconds before trying again
+    success_threshold: int = 2  # Successes needed to close circuit
 
 
 class ParallelExecutor:
@@ -32,16 +71,19 @@ class ParallelExecutor:
 
     Features:
     - Semaphore-based concurrency control
-    - Automatic retry with exponential backoff
+    - Automatic retry with exponential backoff + jitter
+    - Circuit breaker to prevent cascade failures
     - Progress tracking
     - Thread pool for blocking I/O operations
+    - Graceful degradation on partial failures
     """
 
     def __init__(
         self,
         max_concurrent: int = 10,
         retry_attempts: int = 3,
-        retry_delay_base: float = 1.0
+        retry_delay_base: float = 1.0,
+        enable_circuit_breaker: bool = True
     ):
         """
         Initialize the ParallelExecutor.
@@ -50,12 +92,15 @@ class ParallelExecutor:
             max_concurrent: Maximum concurrent tasks
             retry_attempts: Number of retry attempts on failure
             retry_delay_base: Base delay for exponential backoff
+            enable_circuit_breaker: Enable circuit breaker pattern
         """
         self.max_concurrent = max_concurrent
         self.retry_attempts = retry_attempts
         self.retry_delay_base = retry_delay_base
+        self.enable_circuit_breaker = enable_circuit_breaker
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent)
         self._progress_callback: Optional[Callable[[int, int], None]] = None
+        self._circuit_breaker = CircuitBreakerState()
 
     def set_progress_callback(self, callback: Callable[[int, int], None]):
         """Set a callback for progress updates (completed, total)."""
@@ -143,13 +188,67 @@ class ParallelExecutor:
         results = await asyncio.gather(*[limited_task(t) for t in tasks])
         return results
 
+    async def _check_circuit_breaker(self) -> bool:
+        """
+        Check if circuit breaker allows request.
+
+        Returns:
+            True if request is allowed, False if circuit is open.
+        """
+        if not self.enable_circuit_breaker:
+            return True
+
+        cb = self._circuit_breaker
+
+        if cb.is_open:
+            # Check if recovery timeout has passed
+            if time.time() - cb.last_failure_time >= cb.recovery_timeout:
+                # Half-open state: allow one request through
+                print("[CircuitBreaker] Half-open, allowing test request")
+                return True
+            return False
+        return True
+
+    def _record_success(self):
+        """Record a successful request for circuit breaker."""
+        if not self.enable_circuit_breaker:
+            return
+
+        cb = self._circuit_breaker
+        cb.consecutive_successes += 1
+        cb.failures = 0
+
+        if cb.is_open and cb.consecutive_successes >= cb.success_threshold:
+            cb.is_open = False
+            cb.consecutive_successes = 0
+            print("[CircuitBreaker] Circuit closed after successful requests")
+
+    def _record_failure(self, is_rate_limit: bool = False):
+        """Record a failed request for circuit breaker."""
+        if not self.enable_circuit_breaker:
+            return
+
+        cb = self._circuit_breaker
+        cb.failures += 1
+        cb.last_failure_time = time.time()
+        cb.consecutive_successes = 0
+
+        # Rate limit errors should open circuit faster
+        threshold = 2 if is_rate_limit else cb.failure_threshold
+
+        if cb.failures >= threshold and not cb.is_open:
+            cb.is_open = True
+            # Longer recovery for rate limits
+            cb.recovery_timeout = 15.0 if is_rate_limit else 10.0
+            print(f"[CircuitBreaker] Circuit OPEN after {cb.failures} failures (rate_limit={is_rate_limit})")
+
     async def _execute_with_retry(
         self,
         func: Callable[..., T],
         **kwargs
     ) -> T:
         """
-        Execute function with exponential backoff retry.
+        Execute function with exponential backoff retry and circuit breaker.
 
         Args:
             func: Function to execute
@@ -159,17 +258,45 @@ class ParallelExecutor:
             Function result
 
         Raises:
-            Exception: If all retries fail
+            Exception: If all retries fail or circuit is open
         """
         last_error = None
+        retries_used = 0
+
         for attempt in range(self.retry_attempts):
+            # Check circuit breaker
+            if not await self._check_circuit_breaker():
+                # Wait for circuit to potentially close
+                await asyncio.sleep(self._circuit_breaker.recovery_timeout / 2)
+                if not await self._check_circuit_breaker():
+                    raise Exception("Circuit breaker open - too many failures")
+
             try:
-                return await self.execute_async(func, **kwargs)
+                result = await self.execute_async(func, **kwargs)
+                self._record_success()
+                return result
             except Exception as e:
                 last_error = e
+                retries_used = attempt + 1
+                rate_limited = is_rate_limit_error(e)
+                self._record_failure(is_rate_limit=rate_limited)
+
                 if attempt < self.retry_attempts - 1:
-                    delay = self.retry_delay_base * (2 ** attempt)
+                    # Exponential backoff with jitter
+                    base_delay = self.retry_delay_base * (2 ** attempt)
+                    # Add jitter (0-50% of base delay)
+                    jitter = random.uniform(0, base_delay * 0.5)
+                    delay = base_delay + jitter
+
+                    # Longer delay for rate limits
+                    if rate_limited:
+                        delay = max(delay, 5.0) * 1.5
+                        print(f"[Retry] Rate limit detected, waiting {delay:.1f}s (attempt {attempt + 1}/{self.retry_attempts})")
+                    else:
+                        print(f"[Retry] Error: {e}, waiting {delay:.1f}s (attempt {attempt + 1}/{self.retry_attempts})")
+
                     await asyncio.sleep(delay)
+
         raise last_error
 
     def shutdown(self):

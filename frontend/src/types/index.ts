@@ -21,7 +21,7 @@ export type JobStatus =
 /**
  * Pipeline execution mode.
  */
-export type PipelineMode = 'normal' | 'pro'
+export type PipelineMode = 'normal' | 'pro' | 'ultra'
 
 /**
  * Duration option value for the duration selector.
@@ -31,11 +31,20 @@ export type DurationOption = 'auto' | 3 | 5 | 10 | 15 | 20
 
 /**
  * Current phase of the generation process.
+ *
+ * Normal mode: initializing -> analyzing -> scripting -> generating_assets ->
+ *     mixing_audio -> assembling_video -> complete
+ *
+ * Pro mode: initializing -> analyzing -> scripting -> director_review ->
+ *     validating -> generating_tts -> generating_bgm -> generating_images ->
+ *     mixing_audio -> assembling_video -> complete
  */
 export type GenerationPhase =
   | 'initializing'
   | 'analyzing'
   | 'scripting'
+  | 'director_review'  // Pro-only: Director review loop (45-90s)
+  | 'validating'       // Pro-only: Emotion validation + speaker assignment
   | 'generating_tts'
   | 'generating_bgm'
   | 'generating_images'
@@ -63,6 +72,8 @@ export interface GenerationRequest {
   mode: PipelineMode
   /** Target podcast duration in minutes (1-30). Auto-detected from prompt if not specified. */
   target_duration_minutes?: number
+  /** Enable conversational style with cliffhangers, suspense, and dramatic reveals (co-hosts format) */
+  conversational_style?: boolean
   /** Pro mode configuration overrides */
   config?: ProConfig
 }
@@ -338,6 +349,33 @@ export interface PhaseTimings {
 }
 
 /**
+ * Expected duration hint for a pipeline mode.
+ * Included in progress details at the start of generation.
+ */
+export interface DurationHint {
+  mode: 'normal' | 'pro' | 'ultra'
+  expected_minutes_min: number
+  expected_minutes_max: number
+  hint: string
+  phases: {
+    scripting: string
+    assets: string
+    assembly: string
+  }
+}
+
+/**
+ * Director review progress details (Pro mode only).
+ */
+export interface DirectorReviewDetails {
+  round: number
+  max_rounds: number
+  sub_step: 'enhancing' | 'reviewing' | 'approved'
+  phase_progress: number
+  estimated_phase_duration_seconds: number
+}
+
+/**
  * Sub-progress for parallel asset generation.
  */
 export interface ParallelStatus {
@@ -394,6 +432,34 @@ export interface VoicePreset {
 export interface VoiceConfigResponse {
   voices: Record<string, VoicePreset>
   default: string
+}
+
+// =============================================================================
+// Job Logs Types
+// =============================================================================
+
+/**
+ * Individual log entry for job execution.
+ */
+export interface LogEntry {
+  timestamp: string
+  level: 'INFO' | 'ERROR' | 'WARNING'
+  message: string
+  phase?: string
+}
+
+/**
+ * Execution logs response for a job.
+ */
+export interface JobLogs {
+  job_id: string
+  status: string
+  mode: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+  error?: string
+  logs: LogEntry[]
 }
 
 // =============================================================================
