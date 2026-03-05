@@ -633,9 +633,10 @@ class ProPipeline:
         loop = asyncio.get_event_loop()
 
         # Get target duration from content metadata (set by SmartInputHandler)
-        target_duration = content.metadata.get("target_duration_minutes")
+        metadata = content.metadata or {}
+        target_duration = metadata.get("target_duration_minutes")
         # Get conversational style flag (set by PipelineService)
-        conversational_style = content.metadata.get("conversational_style", False)
+        conversational_style = metadata.get("conversational_style", False)
 
         review_history = []
         feedback = None
