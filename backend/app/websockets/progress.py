@@ -181,7 +181,7 @@ async def progress_websocket(
         # Send initial status
         progress = job_manager.get_progress(job_id)
         if progress:
-            await websocket.send_json({
+            initial_msg = {
                 "type": "progress",
                 "job_id": job_id,
                 "phase": progress.phase.value,
@@ -193,7 +193,11 @@ async def progress_websocket(
                 "preview": progress.preview,
                 "elapsed_seconds": progress.elapsed_seconds,
                 "details": progress.details,
-            })
+            }
+            # Include quality if available
+            if progress.quality:
+                initial_msg["quality"] = progress.quality.model_dump() if hasattr(progress.quality, 'model_dump') else progress.quality
+            await websocket.send_json(initial_msg)
 
         # Set up progress listener that sends to this WebSocket
         async def send_update(update):

@@ -26,6 +26,7 @@ from config.paths import OUTPUT_DIR, AUDIO_DIR, TTS_DIR, BGM_DIR, VISUALS_DIR, e
 from utils.input_router import InputRouter, ExtractedContent
 from utils.parallel_executor import TTSParallelExecutor
 from utils.progress_stream import ProgressStream, GenerationPhase
+from utils.quality_evaluator import QualityEvaluator
 
 
 @dataclass
@@ -195,6 +196,7 @@ class ProPipelineResult:
     duration_seconds: float
     config_used: Optional[ProConfig] = None
     error: Optional[str] = None
+    quality_report: Optional[Dict[str, Any]] = None
 
 
 class ProPipeline:
@@ -291,7 +293,8 @@ class ProPipeline:
         self,
         content: ExtractedContent,
         progress: Optional[ProgressStream] = None,
-        on_script_ready: Optional[callable] = None
+        on_script_ready: Optional[callable] = None,
+        trailer_image_path: Optional[str] = None
     ) -> ProPipelineResult:
         """
         Run the pipeline with pre-extracted content.
@@ -305,6 +308,8 @@ class ProPipeline:
             on_script_ready: Optional callback called when script is enhanced.
                              Receives (job_id, script_dict) arguments.
                              Used for fire-and-forget trailer generation.
+            trailer_image_path: Optional path to trailer image to reuse as
+                                first image for visual consistency.
 
         Returns:
             ProPipelineResult with all outputs
@@ -319,14 +324,15 @@ class ProPipeline:
 
         print(f"[ProPipeline] Using pre-processed content: {len(content.text)} characters from {content.source_type}")
 
-        return await self._run_with_content(content, progress, start_time, on_script_ready)
+        return await self._run_with_content(content, progress, start_time, on_script_ready, trailer_image_path)
 
     async def _run_with_content(
         self,
         content: ExtractedContent,
         progress: Optional[ProgressStream],
         start_time: float,
-        on_script_ready: Optional[callable] = None
+        on_script_ready: Optional[callable] = None,
+        trailer_image_path: Optional[str] = None
     ) -> ProPipelineResult:
         """
         Internal method to run pipeline with content.
@@ -336,6 +342,7 @@ class ProPipeline:
             progress: Progress stream
             start_time: Pipeline start time
             on_script_ready: Optional callback called when script is enhanced.
+            trailer_image_path: Optional path to trailer image for visual consistency.
 
         Returns:
             ProPipelineResult
@@ -407,7 +414,7 @@ class ProPipeline:
                 )
 
             image_task = asyncio.create_task(
-                self._generate_images_parallel(script, progress)
+                self._generate_images_parallel(script, progress, trailer_image_path)
             )
 
             # Wait for all three to complete - use return_exceptions=True to prevent
@@ -442,6 +449,18 @@ class ProPipeline:
                 print(f"[ProPipeline] Video assembly failed, returning audio: {video_err}")
                 final_video = final_audio
 
+            # Stage 9: Quality evaluation (with incremental progress updates)
+            quality_report = await self._evaluate_quality(
+                job_id=job_id,
+                script=script,
+                tts_results=tts_results,
+                bgm_results=bgm_results,
+                image_results=image_results,
+                final_audio=final_audio,
+                final_video=final_video,
+                progress=progress,
+            )
+
             duration = time.time() - start_time
 
             if progress:
@@ -458,6 +477,7 @@ class ProPipeline:
                 image_files=image_results,
                 duration_seconds=duration,
                 config_used=self.config,
+                quality_report=quality_report,
             )
 
         except Exception as e:
@@ -908,14 +928,37 @@ class ProPipeline:
     async def _generate_images_parallel(
         self,
         script: Dict[str, Any],
-        progress: Optional[ProgressStream] = None
+        progress: Optional[ProgressStream] = None,
+        trailer_image_path: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Generate 16 narrative images with emotion alignment."""
+        """Generate narrative images with emotion alignment.
+
+        If a trailer image exists, it will be used as the first image
+        to ensure visual consistency between the preview and full video.
+
+        Args:
+            script: Enhanced script with emotion annotations
+            progress: Optional progress stream for updates
+            trailer_image_path: Optional path to trailer image to reuse as first image
+
+        Returns:
+            List of image result dictionaries
+        """
         from agents.visual_enhancer_agent import VisualEnhancerAgent
+        import os
 
         generator = VisualEnhancerAgent(emotion_aligned=self.config.emotion_image_alignment)
 
         loop = asyncio.get_event_loop()
+
+        # Check if trailer image exists and can be reused
+        use_trailer_image = (
+            trailer_image_path and
+            os.path.exists(trailer_image_path)
+        )
+
+        if use_trailer_image:
+            print(f"[ProPipeline] Reusing trailer image as first image: {trailer_image_path}")
 
         # Use emotion-aligned generation if script has visual_cues and emotions
         if self.config.emotion_image_alignment and script.get("modules"):
@@ -930,17 +973,43 @@ class ProPipeline:
             for module_id, module_images in all_results.get("modules", {}).items():
                 results.extend(module_images)
 
+            # Replace first image with trailer image if available
+            if use_trailer_image and results:
+                results[0] = {
+                    "path": trailer_image_path,
+                    "type": "hook",
+                    "emotion": results[0].get("emotion", "intrigue"),
+                    "reused_from_trailer": True
+                }
+
             return results
 
         # Fall back to default prompts
         results = []
 
-        # Generate hook images
-        hook_results = await loop.run_in_executor(
-            None,
-            generator.generate_hook_images
-        )
-        results.extend(hook_results)
+        # Generate hook images (or reuse trailer image for first)
+        if use_trailer_image:
+            # Add trailer image as first hook image
+            results.append({
+                "path": trailer_image_path,
+                "type": "hook",
+                "emotion": "intrigue",
+                "reused_from_trailer": True
+            })
+            # Generate remaining hook images (if generator normally creates multiple)
+            hook_results = await loop.run_in_executor(
+                None,
+                generator.generate_hook_images
+            )
+            # Skip first hook result since we're using trailer image
+            if len(hook_results) > 1:
+                results.extend(hook_results[1:])
+        else:
+            hook_results = await loop.run_in_executor(
+                None,
+                generator.generate_hook_images
+            )
+            results.extend(hook_results)
 
         # Generate module images
         for module_id in [1, 2, 3, 4]:
@@ -1048,6 +1117,131 @@ class ProPipeline:
         )
 
         return str(output_path)
+
+    async def _evaluate_quality(
+        self,
+        job_id: str,
+        script: Dict[str, Any],
+        tts_results: List[Dict[str, Any]],
+        bgm_results: List[Dict[str, Any]],
+        image_results: List[Dict[str, Any]],
+        final_audio: str,
+        final_video: str,
+        progress: Optional[ProgressStream] = None,
+    ) -> Dict[str, Any]:
+        """
+        Evaluate podcast quality across all dimensions with incremental updates.
+
+        Sends real-time quality updates via progress stream as each dimension
+        is evaluated, enabling the frontend to show scores as they become available.
+
+        Args:
+            job_id: Job identifier
+            script: Enhanced script
+            tts_results: TTS generation results
+            bgm_results: BGM generation results
+            image_results: Image generation results
+            final_audio: Path to final audio
+            final_video: Path to final video
+            progress: Optional progress stream for real-time quality updates
+
+        Returns:
+            Quality report dictionary
+        """
+        loop = asyncio.get_event_loop()
+
+        evaluator = QualityEvaluator(job_id=job_id, output_dir=self.output_dir)
+
+        def _update_progress_quality(dimension: str, metrics):
+            """Helper to update progress stream with quality score."""
+            if progress and hasattr(metrics, 'score'):
+                score = int(metrics.score())
+                grade = evaluator.metrics.get_grade(score)
+                issues = getattr(metrics, 'issues', [])
+                progress.update_quality_dimension(dimension, score, grade, 'complete', issues)
+                # Add any issues to the overall list
+                for issue in issues:
+                    progress.add_quality_issue(f"[{dimension}] {issue}")
+
+        try:
+            # Evaluate script
+            if progress:
+                progress.set_quality_evaluating('script')
+            script_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_script(script))
+            _update_progress_quality('script', script_metrics)
+
+            # Evaluate voice/TTS
+            if progress:
+                progress.set_quality_evaluating('voice')
+            voice_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_voice(tts_results))
+            _update_progress_quality('voice', voice_metrics)
+
+            # Evaluate BGM
+            if progress:
+                progress.set_quality_evaluating('bgm')
+            bgm_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_bgm(bgm_results, None))
+            _update_progress_quality('bgm', bgm_metrics)
+
+            # Evaluate pacing
+            if progress:
+                progress.set_quality_evaluating('pacing')
+            pacing_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_pacing(tts_results, None))
+            _update_progress_quality('pacing', pacing_metrics)
+
+            if final_audio:
+                # Evaluate audio mix
+                if progress:
+                    progress.set_quality_evaluating('audio_mix')
+                audio_mix_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_audio_mix(final_audio)
+                )
+                _update_progress_quality('audio_mix', audio_mix_metrics)
+
+                # Evaluate ending
+                if progress:
+                    progress.set_quality_evaluating('ending')
+                ending_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_ending(final_audio)
+                )
+                _update_progress_quality('ending', ending_metrics)
+
+                # Evaluate duration
+                if progress:
+                    progress.set_quality_evaluating('duration')
+                target_duration = script.get("target_duration_minutes", 10)
+                duration_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_duration(final_audio, target_duration)
+                )
+                _update_progress_quality('duration', duration_metrics)
+
+            if final_video and final_video != final_audio:
+                # Evaluate video
+                if progress:
+                    progress.set_quality_evaluating('video')
+                video_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_video(final_video, image_results)
+                )
+                _update_progress_quality('video', video_metrics)
+
+            # Generate and save report
+            report = evaluator.generate_report()
+            evaluator.save_report(f"quality_report_{job_id}")
+            evaluator.log_summary()
+
+            # Add recommendations to progress stream
+            if progress:
+                for rec in report.get('recommendations', []):
+                    progress.add_quality_recommendation(rec)
+
+            return report
+
+        except Exception as e:
+            print(f"[ProPipeline] Quality evaluation error: {e}")
+            return {"error": str(e), "job_id": job_id}
 
 
 def run_pro_pipeline(

@@ -204,6 +204,7 @@ export class ProgressWebSocket {
               preview: message.preview,
               elapsed_seconds: message.elapsed_seconds || 0,
               details: message.details,
+              quality: message.quality,
             })
           }
           break

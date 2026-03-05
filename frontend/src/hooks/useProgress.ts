@@ -11,7 +11,7 @@ import {
   ConnectionState,
 } from '@/lib/websocket'
 import { getJobStatus } from '@/lib/api'
-import type { ProgressResponse } from '@/types'
+import type { ProgressResponse, QualityReport } from '@/types'
 
 /**
  * Return type for the useProgress hook.
@@ -32,6 +32,8 @@ interface UseProgressReturn {
   } | null
   /** Error message if any */
   error: string | null
+  /** Real-time quality metrics */
+  quality: QualityReport | null
   /** Manually disconnect */
   disconnect: () => void
   /** Request job cancellation */
@@ -64,6 +66,7 @@ export function useProgress(jobId: string | null): UseProgressReturn {
     durationSeconds?: number
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [quality, setQuality] = useState<QualityReport | null>(null)
 
   const wsRef = useRef<ProgressWebSocket | null>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -118,6 +121,7 @@ export function useProgress(jobId: string | null): UseProgressReturn {
     setIsComplete(false)
     setCompletionData(null)
     setError(null)
+    setQuality(null)
 
     // Don't connect if no jobId
     if (!jobId) {
@@ -130,6 +134,10 @@ export function useProgress(jobId: string | null): UseProgressReturn {
 
     ws.setProgressCallback((data) => {
       setProgress(data)
+      // Extract quality from progress data if available
+      if (data.quality) {
+        setQuality(data.quality)
+      }
     })
 
     ws.setCompleteCallback((data) => {
@@ -194,6 +202,7 @@ export function useProgress(jobId: string | null): UseProgressReturn {
     isComplete,
     completionData,
     error,
+    quality,
     disconnect,
     requestCancel,
   }

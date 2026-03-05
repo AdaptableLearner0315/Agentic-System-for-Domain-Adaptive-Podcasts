@@ -32,6 +32,7 @@ from utils.parallel_executor import (
     ImageParallelExecutor,
 )
 from utils.progress_stream import ProgressStream, GenerationPhase
+from utils.quality_evaluator import QualityEvaluator
 
 
 @dataclass
@@ -49,6 +50,7 @@ class NormalPipelineResult:
         image_files: Per-image generation results with paths.
         duration_seconds: Total wall-clock time of the pipeline run.
         error: Error message if success is False.
+        quality_report: Quality evaluation report (optional).
     """
     success: bool
     output_path: Optional[str]
@@ -59,6 +61,7 @@ class NormalPipelineResult:
     image_files: List[Dict[str, Any]]
     duration_seconds: float
     error: Optional[str] = None
+    quality_report: Optional[Dict[str, Any]] = None
 
 
 class NormalPipeline:
@@ -279,6 +282,17 @@ class NormalPipeline:
             stage_timings.update(asset_timings)
             stage_timings['total'] = round(time.time() - start_time, 1)
 
+            # Stage 5: Quality evaluation (with incremental progress updates)
+            quality_report = await self._evaluate_quality(
+                script=script,
+                tts_results=tts_results,
+                bgm_results=bgm_results,
+                image_results=image_results,
+                final_audio=final_audio,
+                final_video=final_video,
+                progress=progress,
+            )
+
             duration = time.time() - start_time
 
             if progress:
@@ -299,6 +313,7 @@ class NormalPipeline:
                 bgm_files=bgm_results,
                 image_files=image_results,
                 duration_seconds=duration,
+                quality_report=quality_report,
             )
 
         except Exception as e:
@@ -1037,6 +1052,129 @@ class NormalPipeline:
         )
 
         return str(output_path)
+
+    async def _evaluate_quality(
+        self,
+        script: Dict[str, Any],
+        tts_results: List[Dict[str, Any]],
+        bgm_results: List[Dict[str, Any]],
+        image_results: List[Dict[str, Any]],
+        final_audio: str,
+        final_video: str,
+        progress: Optional[ProgressStream] = None,
+    ) -> Dict[str, Any]:
+        """
+        Evaluate podcast quality across all dimensions with incremental updates.
+
+        Sends real-time quality updates via progress stream as each dimension
+        is evaluated, enabling the frontend to show scores as they become available.
+
+        Args:
+            script: Enhanced script
+            tts_results: TTS generation results
+            bgm_results: BGM generation results
+            image_results: Image generation results
+            final_audio: Path to final audio
+            final_video: Path to final video
+            progress: Optional progress stream for real-time quality updates
+
+        Returns:
+            Quality report dictionary
+        """
+        loop = asyncio.get_event_loop()
+
+        evaluator = QualityEvaluator(job_id=self.job_id, output_dir=self.output_dir)
+
+        def _update_progress_quality(dimension: str, metrics):
+            """Helper to update progress stream with quality score."""
+            if progress and hasattr(metrics, 'score'):
+                score = int(metrics.score())
+                grade = evaluator.metrics.get_grade(score)
+                issues = getattr(metrics, 'issues', [])
+                progress.update_quality_dimension(dimension, score, grade, 'complete', issues)
+                # Add any issues to the overall list
+                for issue in issues:
+                    progress.add_quality_issue(f"[{dimension}] {issue}")
+
+        try:
+            # Evaluate script
+            if progress:
+                progress.set_quality_evaluating('script')
+            script_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_script(script))
+            _update_progress_quality('script', script_metrics)
+
+            # Evaluate voice/TTS
+            if progress:
+                progress.set_quality_evaluating('voice')
+            voice_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_voice(tts_results))
+            _update_progress_quality('voice', voice_metrics)
+
+            # Evaluate BGM
+            if progress:
+                progress.set_quality_evaluating('bgm')
+            bgm_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_bgm(bgm_results, None))
+            _update_progress_quality('bgm', bgm_metrics)
+
+            # Evaluate pacing (derived from TTS results)
+            if progress:
+                progress.set_quality_evaluating('pacing')
+            pacing_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_pacing(tts_results, None))
+            _update_progress_quality('pacing', pacing_metrics)
+
+            if final_audio:
+                # Evaluate ending
+                if progress:
+                    progress.set_quality_evaluating('ending')
+                ending_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_ending(final_audio)
+                )
+                _update_progress_quality('ending', ending_metrics)
+
+                # Evaluate audio mix
+                if progress:
+                    progress.set_quality_evaluating('audio_mix')
+                audio_mix_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_audio_mix(final_audio)
+                )
+                _update_progress_quality('audio_mix', audio_mix_metrics)
+
+                # Evaluate duration
+                if progress:
+                    progress.set_quality_evaluating('duration')
+                target_duration = script.get("target_duration_minutes", 5)
+                duration_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_duration(final_audio, target_duration)
+                )
+                _update_progress_quality('duration', duration_metrics)
+
+            if final_video and final_video != final_audio:
+                # Evaluate video
+                if progress:
+                    progress.set_quality_evaluating('video')
+                video_metrics = await loop.run_in_executor(
+                    None,
+                    lambda: evaluator.analyze_video(final_video, image_results)
+                )
+                _update_progress_quality('video', video_metrics)
+
+            # Generate and save report
+            report = evaluator.generate_report()
+            evaluator.save_report(f"quality_report_{self.job_id}")
+            evaluator.log_summary()
+
+            # Add recommendations to progress stream
+            if progress:
+                for rec in report.get('recommendations', []):
+                    progress.add_quality_recommendation(rec)
+
+            return report
+
+        except Exception as e:
+            print(f"[NormalPipeline] Quality evaluation error: {e}")
+            return {"error": str(e), "job_id": self.job_id}
 
 
 def run_normal_pipeline(

@@ -63,9 +63,10 @@ class ProgressUpdate:
     preview: Optional[str] = None  # Preview content (e.g., hook text)
     details: Dict[str, Any] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
+    quality: Optional[Dict[str, Any]] = None  # Quality metrics
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             'phase': self.phase.value,
             'message': self.message,
             'progress_percent': round(self.progress_percent, 1),
@@ -76,6 +77,9 @@ class ProgressUpdate:
             'details': self.details,
             'elapsed_seconds': round(self.elapsed_seconds, 1),
         }
+        if self.quality:
+            result['quality'] = self.quality
+        return result
 
 
 class ProgressStream:
@@ -134,6 +138,11 @@ class ProgressStream:
     # Backwards compatibility alias
     PHASE_WEIGHTS = NORMAL_PHASE_WEIGHTS
 
+    # Quality dimension definitions
+    QUALITY_DIMENSIONS = [
+        'script', 'pacing', 'voice', 'bgm', 'audio_mix', 'video', 'ending', 'duration'
+    ]
+
     def __init__(self, callback: Optional[Callable[[ProgressUpdate], None]] = None, mode: str = "normal"):
         """
         Initialize the ProgressStream.
@@ -150,10 +159,108 @@ class ProgressStream:
         self._phase_progress = {phase: 0.0 for phase in GenerationPhase}
         self._phase_durations: Dict[str, float] = {}
         self._updates = []
+        # Quality tracking
+        self._quality_scores: Dict[str, Dict[str, Any]] = {
+            dim: {'dimension': dim, 'score': None, 'grade': None, 'status': 'pending', 'issues': []}
+            for dim in self.QUALITY_DIMENSIONS
+        }
+        self._quality_issues: list = []
+        self._quality_recommendations: list = []
 
     def set_mode(self, mode: str):
         """Set the pipeline mode (normal or pro)."""
         self._mode = mode
+
+    def update_quality_dimension(
+        self,
+        dimension: str,
+        score: Optional[int] = None,
+        grade: Optional[str] = None,
+        status: str = 'complete',
+        issues: Optional[list] = None
+    ):
+        """
+        Update quality score for a specific dimension.
+
+        Args:
+            dimension: Quality dimension name (script, pacing, voice, etc.)
+            score: Numeric score 0-100
+            grade: Letter grade (A, B+, C, etc.)
+            status: Evaluation status (pending, evaluating, complete, error)
+            issues: List of issues detected
+        """
+        if dimension in self._quality_scores:
+            self._quality_scores[dimension] = {
+                'dimension': dimension,
+                'score': score,
+                'grade': grade,
+                'status': status,
+                'issues': issues or [],
+            }
+
+    def set_quality_evaluating(self, dimension: str):
+        """Mark a quality dimension as currently being evaluated."""
+        if dimension in self._quality_scores:
+            self._quality_scores[dimension]['status'] = 'evaluating'
+
+    def add_quality_issue(self, issue: str):
+        """Add a quality issue to the report."""
+        if issue not in self._quality_issues:
+            self._quality_issues.append(issue)
+
+    def add_quality_recommendation(self, recommendation: str):
+        """Add a quality recommendation to the report."""
+        if recommendation not in self._quality_recommendations:
+            self._quality_recommendations.append(recommendation)
+
+    def _get_quality_report(self) -> Dict[str, Any]:
+        """
+        Build the current quality report.
+
+        Returns:
+            Dictionary containing quality report data
+        """
+        # Calculate overall score from completed dimensions
+        completed_scores = [
+            s['score'] for s in self._quality_scores.values()
+            if s['score'] is not None
+        ]
+        if completed_scores:
+            overall_score = int(sum(completed_scores) / len(completed_scores))
+            overall_grade = self._score_to_grade(overall_score)
+        else:
+            overall_score = None
+            overall_grade = None
+
+        return {
+            'overall_score': overall_score,
+            'overall_grade': overall_grade,
+            'scores': list(self._quality_scores.values()),
+            'issues': self._quality_issues,
+            'recommendations': self._quality_recommendations,
+        }
+
+    def _score_to_grade(self, score: int) -> str:
+        """Convert numeric score to letter grade."""
+        if score >= 93:
+            return "A"
+        elif score >= 90:
+            return "A-"
+        elif score >= 87:
+            return "B+"
+        elif score >= 83:
+            return "B"
+        elif score >= 80:
+            return "B-"
+        elif score >= 77:
+            return "C+"
+        elif score >= 73:
+            return "C"
+        elif score >= 70:
+            return "C-"
+        elif score >= 60:
+            return "D"
+        return "F"
 
     def _get_phase_weights(self) -> Dict[GenerationPhase, int]:
         """Get phase weights based on current mode."""
@@ -279,7 +386,7 @@ class ProgressStream:
         }
         merged_details = {**(details or {}), **phase_timing_details}
 
-        # Create update
+        # Create update with quality data
         update = ProgressUpdate(
             phase=phase,
             message=message,
@@ -290,6 +397,7 @@ class ProgressStream:
             preview=preview,
             details=merged_details,
             elapsed_seconds=time.time() - self._start_time,
+            quality=self._get_quality_report(),
         )
 
         self._updates.append(update)

@@ -30,6 +30,7 @@ class ProgressUpdate:
         preview: Preview content
         elapsed_seconds: Time elapsed since start
         details: Additional details
+        quality: Real-time quality metrics
     """
     job_id: str
     phase: GenerationPhase
@@ -41,10 +42,11 @@ class ProgressUpdate:
     preview: Optional[str] = None
     elapsed_seconds: float = 0.0
     details: Optional[Dict[str, Any]] = None
+    quality: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        result = {
             "job_id": self.job_id,
             "phase": self.phase.value,
             "message": self.message,
@@ -56,6 +58,9 @@ class ProgressUpdate:
             "elapsed_seconds": self.elapsed_seconds,
             "details": self.details,
         }
+        if self.quality:
+            result["quality"] = self.quality
+        return result
 
     def to_json(self) -> str:
         """Convert to JSON string."""
@@ -126,6 +131,11 @@ class ProgressAdapter:
         self._last_phase = phase
         self._last_percent = percent
 
+        # Extract quality data if present
+        quality_data = None
+        if hasattr(update, "quality") and update.quality:
+            quality_data = update.quality
+
         # Convert to our ProgressUpdate format
         progress_update = ProgressUpdate(
             job_id=self.job_id,
@@ -138,6 +148,7 @@ class ProgressAdapter:
             preview=update.preview,
             elapsed_seconds=update.elapsed_seconds,
             details=update.details if hasattr(update, "details") else None,
+            quality=quality_data,
         )
 
         # Queue for async processing
@@ -213,6 +224,32 @@ class ProgressAdapter:
         Returns:
             ProgressResponse for API output.
         """
+        from ..models.responses import QualityReport, QualityScore
+
+        # Convert quality dict to QualityReport model if present
+        quality_report = None
+        if update.quality:
+            try:
+                scores = [
+                    QualityScore(
+                        dimension=s.get('dimension', ''),
+                        score=s.get('score'),
+                        grade=s.get('grade'),
+                        status=s.get('status', 'pending'),
+                        issues=s.get('issues', []),
+                    )
+                    for s in update.quality.get('scores', [])
+                ]
+                quality_report = QualityReport(
+                    overall_score=update.quality.get('overall_score'),
+                    overall_grade=update.quality.get('overall_grade'),
+                    scores=scores,
+                    issues=update.quality.get('issues', []),
+                    recommendations=update.quality.get('recommendations', []),
+                )
+            except Exception:
+                pass  # Skip quality if conversion fails
+
         return ProgressResponse(
             job_id=update.job_id,
             phase=update.phase,
@@ -224,6 +261,7 @@ class ProgressAdapter:
             preview=update.preview,
             elapsed_seconds=update.elapsed_seconds,
             details=update.details,
+            quality=quality_report,
         )
 
 

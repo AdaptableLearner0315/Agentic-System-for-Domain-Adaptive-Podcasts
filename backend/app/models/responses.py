@@ -5,11 +5,53 @@ These models define the structure of API responses,
 ensuring consistent JSON output format.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 from .enums import JobStatus, PipelineMode, GenerationPhase
+
+
+# =============================================================================
+# Quality Models
+# =============================================================================
+
+class QualityScore(BaseModel):
+    """
+    Quality score for a single dimension.
+
+    Attributes:
+        dimension: Name of the quality dimension (script, pacing, voice, etc.)
+        score: Numeric score 0-100, None if not yet evaluated
+        grade: Letter grade (A, B+, C, etc.), None if not yet evaluated
+        status: Evaluation status
+        issues: List of issues detected for this dimension
+    """
+    dimension: str = Field(..., description="Quality dimension name")
+    score: Optional[int] = Field(None, ge=0, le=100, description="Score 0-100")
+    grade: Optional[str] = Field(None, description="Letter grade (A, B+, C, etc.)")
+    status: Literal["pending", "evaluating", "complete", "error"] = Field(
+        "pending", description="Evaluation status"
+    )
+    issues: List[str] = Field(default_factory=list, description="Issues detected")
+
+
+class QualityReport(BaseModel):
+    """
+    Comprehensive quality report for a generation job.
+
+    Attributes:
+        overall_score: Weighted overall score 0-100
+        overall_grade: Letter grade for overall quality
+        scores: List of per-dimension quality scores
+        issues: All detected issues across dimensions
+        recommendations: Actionable recommendations for improvement
+    """
+    overall_score: Optional[int] = Field(None, ge=0, le=100, description="Overall score")
+    overall_grade: Optional[str] = Field(None, description="Overall letter grade")
+    scores: List[QualityScore] = Field(default_factory=list, description="Per-dimension scores")
+    issues: List[str] = Field(default_factory=list, description="All detected issues")
+    recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations")
 
 
 class HealthResponse(BaseModel):
@@ -54,6 +96,7 @@ class ProgressResponse(BaseModel):
         eta_seconds: Estimated time remaining
         preview: Preview content (e.g., script excerpt)
         elapsed_seconds: Time elapsed since start
+        quality: Real-time quality metrics (populated as evaluation progresses)
     """
     job_id: str = Field(..., description="Unique job identifier")
     phase: GenerationPhase = Field(..., description="Current generation phase")
@@ -65,6 +108,7 @@ class ProgressResponse(BaseModel):
     preview: Optional[str] = Field(None, description="Preview content")
     elapsed_seconds: float = Field(0.0, ge=0)
     details: Optional[Dict[str, Any]] = None
+    quality: Optional[QualityReport] = Field(None, description="Real-time quality metrics")
 
 
 class AssetInfo(BaseModel):

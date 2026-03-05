@@ -8,10 +8,11 @@ import { DurationDropdown } from '@/components/DurationDropdown'
 import { ProgressTracker } from '@/components/ProgressTracker'
 import { OutputPlayer } from '@/components/OutputPlayer'
 import { TrailerPreview } from '@/components/TrailerPreview'
+import { QualityPanel } from '@/components/QualityPanel'
 import { useGeneration } from '@/hooks/useGeneration'
 import { suggestTopic } from '@/lib/api'
 import { STORAGE_KEYS } from '@/lib/constants'
-import { PipelineMode, DurationOption, ProgressResponse } from '@/types'
+import { PipelineMode, DurationOption, ProgressResponse, QualityReport } from '@/types'
 
 /**
  * Collapsible section component for stacked card layout.
@@ -64,51 +65,86 @@ function formatErrorMessage(error: string): { title: string; message: string } {
 
 /**
  * Generating view shown during podcast creation.
- * Displays prompt, progress tracker, trailer preview, and cancel button.
+ * Displays prompt, progress tracker, quality panel, trailer preview, and cancel button.
  */
 function GeneratingView({
   prompt,
   progress,
+  quality,
   trailer,
   showTrailer,
   onCancel,
 }: {
   prompt: string
   progress: ProgressResponse | null
+  quality: QualityReport | null
   trailer: { url: string; duration_seconds: number } | null
   showTrailer: boolean
   onCancel: () => void
 }) {
   return (
-    <div className="card text-center py-10 px-6 animate-slide-in-up">
+    <div className="animate-slide-in-up">
       {/* Topic being generated */}
-      <p className="text-sm text-muted-foreground mb-2">Creating podcast...</p>
-      <h2 className="text-lg font-medium mb-8 max-w-md mx-auto text-foreground">
-        &ldquo;{prompt || 'Uploaded content'}&rdquo;
-      </h2>
+      <div className="text-center mb-6">
+        <p className="text-sm text-muted-foreground mb-2">Creating podcast...</p>
+        <h2 className="text-lg font-medium max-w-md mx-auto text-foreground">
+          &ldquo;{prompt || 'Uploaded content'}&rdquo;
+        </h2>
+      </div>
 
-      {/* Progress Tracker */}
-      {progress && <ProgressTracker progress={progress} />}
+      {/* Main content: Progress + Quality Panel side by side */}
+      <div className="flex flex-col lg:flex-row gap-6 justify-center items-start">
+        {/* Left: Progress Tracker and Trailer */}
+        <div className="flex-1 max-w-xl w-full space-y-6">
+          {/* Progress Tracker */}
+          {progress && <ProgressTracker progress={progress} />}
 
-      {/* Trailer Preview (when ready) */}
-      {trailer && showTrailer && (
-        <div className="mt-6">
-          <TrailerPreview
-            trailerUrl={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${trailer.url}`}
-            duration={trailer.duration_seconds}
-            isFullReady={false}
-            onViewFull={() => {}}
-          />
+          {/* Trailer Preview (when ready) */}
+          {trailer && showTrailer && (
+            <TrailerPreview
+              trailerUrl={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${trailer.url}`}
+              duration={trailer.duration_seconds}
+              isFullReady={false}
+              onViewFull={() => {}}
+            />
+          )}
+
+          {/* Cancel Button */}
+          <div className="text-center">
+            <button
+              className="btn-outline px-8"
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-      )}
 
-      {/* Cancel Button */}
-      <button
-        className="btn-outline mt-8 px-8"
-        onClick={onCancel}
-      >
-        Cancel
-      </button>
+        {/* Right: Quality Panel */}
+        <div className="hidden lg:block">
+          <QualityPanel quality={quality} isComplete={false} />
+        </div>
+      </div>
+
+      {/* Mobile Quality Panel (collapsed by default, shown below progress) */}
+      <div className="lg:hidden mt-6">
+        <details className="group">
+          <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
+            <span>Quality Metrics</span>
+            <svg
+              className="w-4 h-4 transition-transform group-open:rotate-180"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </summary>
+          <div className="mt-4 flex justify-center">
+            <QualityPanel quality={quality} isComplete={false} />
+          </div>
+        </details>
+      </div>
     </div>
   )
 }
@@ -135,6 +171,7 @@ export default function Home() {
     result,
     error,
     trailer,
+    quality,
     startGeneration,
     cancelGeneration,
     reset,
@@ -223,7 +260,7 @@ export default function Home() {
     <main className="min-h-screen">
       <Header />
 
-      <div className={`container mx-auto px-4 py-12 ${isComplete ? 'max-w-6xl' : 'max-w-xl'}`}>
+      <div className={`container mx-auto px-4 py-12 ${isComplete ? 'max-w-6xl' : isGenerating ? 'max-w-4xl' : 'max-w-xl'}`}>
         {/* Title */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold gradient-text mb-2">
@@ -389,6 +426,7 @@ export default function Home() {
           <GeneratingView
             prompt={prompt}
             progress={progress}
+            quality={quality}
             trailer={trailer}
             showTrailer={showTrailer}
             onCancel={cancelGeneration}

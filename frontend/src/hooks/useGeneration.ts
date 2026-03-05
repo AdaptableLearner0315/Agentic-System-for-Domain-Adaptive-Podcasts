@@ -15,6 +15,7 @@ import type {
   ProgressResponse,
   ResultResponse,
   TrailerData,
+  QualityReport,
 } from '@/types'
 
 /**
@@ -35,6 +36,8 @@ interface UseGenerationReturn {
   isLoading: boolean
   /** Trailer preview data (available before full result) */
   trailer: TrailerData | null
+  /** Real-time quality metrics */
+  quality: QualityReport | null
   /** Start a new generation */
   startGeneration: (request: GenerationRequest) => Promise<void>
   /** Cancel the current job */
@@ -71,6 +74,7 @@ export function useGeneration(): UseGenerationReturn {
   const [error, setError] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [trailer, setTrailer] = useState<TrailerData | null>(null)
+  const [quality, setQuality] = useState<QualityReport | null>(null)
 
   // WebSocket connection ref
   const wsRef = useRef<ProgressWebSocket | null>(null)
@@ -123,6 +127,10 @@ export function useGeneration(): UseGenerationReturn {
     const ws = createProgressConnection(jobId, {
       onProgress: (progressData) => {
         setProgress(progressData)
+        // Extract quality data from progress if available
+        if (progressData.quality) {
+          setQuality(progressData.quality)
+        }
         if (progressData.phase === 'complete') {
           setStatus('completed')
         } else if (progressData.phase === 'error') {
@@ -182,6 +190,7 @@ export function useGeneration(): UseGenerationReturn {
     setResult(null)
     setProgress(null)
     setTrailer(null)
+    setQuality(null)
 
     try {
       // Create job via API
@@ -241,6 +250,7 @@ export function useGeneration(): UseGenerationReturn {
     setError(null)
     setJobId(null)
     setTrailer(null)
+    setQuality(null)
   }, [])
 
   return {
@@ -251,6 +261,7 @@ export function useGeneration(): UseGenerationReturn {
     jobId,
     isLoading: status === 'pending' || status === 'running',
     trailer,
+    quality,
     startGeneration: handleStartGeneration,
     cancelGeneration: handleCancelGeneration,
     reset: handleReset,

@@ -109,6 +109,47 @@ export interface URLExtractionRequest {
 }
 
 // =============================================================================
+// Quality Types
+// =============================================================================
+
+/**
+ * Status of quality evaluation for a dimension.
+ */
+export type QualityStatus = 'pending' | 'evaluating' | 'complete' | 'error'
+
+/**
+ * Quality score for a single dimension.
+ */
+export interface QualityScore {
+  /** Name of the quality dimension (script, pacing, voice, etc.) */
+  dimension: string
+  /** Numeric score 0-100, null if not yet evaluated */
+  score: number | null
+  /** Letter grade (A, B+, C, etc.), null if not yet evaluated */
+  grade: string | null
+  /** Evaluation status */
+  status: QualityStatus
+  /** Issues detected for this dimension */
+  issues: string[]
+}
+
+/**
+ * Comprehensive quality report for a generation job.
+ */
+export interface QualityReport {
+  /** Weighted overall score 0-100 */
+  overall_score: number | null
+  /** Letter grade for overall quality */
+  overall_grade: string | null
+  /** Per-dimension quality scores */
+  scores: QualityScore[]
+  /** All detected issues across dimensions */
+  issues: string[]
+  /** Actionable recommendations for improvement */
+  recommendations: string[]
+}
+
+// =============================================================================
 // Response Types
 // =============================================================================
 
@@ -126,6 +167,8 @@ export interface ProgressResponse {
   preview?: string
   elapsed_seconds: number
   details?: Record<string, unknown>
+  /** Real-time quality metrics (populated as evaluation progresses) */
+  quality?: QualityReport
 }
 
 /**
@@ -330,6 +373,8 @@ export interface WebSocketMessage {
   error?: string
   // Trailer-specific fields
   trailer_url?: string
+  // Quality metrics
+  quality?: QualityReport
 }
 
 /**
