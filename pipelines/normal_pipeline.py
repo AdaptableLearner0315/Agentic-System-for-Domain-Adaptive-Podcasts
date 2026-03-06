@@ -33,6 +33,8 @@ from utils.parallel_executor import (
 )
 from utils.progress_stream import ProgressStream, GenerationPhase
 from utils.quality_evaluator import QualityEvaluator
+from utils.evaluation_store import EvaluationStore, get_evaluation_store
+from utils.quality_trace import QualityTraceReport
 
 
 @dataclass
@@ -62,6 +64,78 @@ class NormalPipelineResult:
     duration_seconds: float
     error: Optional[str] = None
     quality_report: Optional[Dict[str, Any]] = None
+
+
+def _update_quality_dimension(
+    evaluator: 'QualityEvaluator',
+    progress: Optional['ProgressStream'],
+    dimension: str,
+    metrics,
+    job_id: str,
+    store: Optional['EvaluationStore'] = None
+) -> None:
+    """
+    Helper to update progress stream with quality score and trace for a dimension.
+
+    Builds a full QualityTrace with reasoning, strengths, weaknesses, and
+    persists to SQLite for observability.
+
+    Args:
+        evaluator: QualityEvaluator instance for trace building
+        progress: Optional progress stream for real-time updates
+        dimension: Quality dimension name (script, voice, bgm, etc.)
+        metrics: Metrics object with score() method and issues list
+        job_id: Job identifier for trace storage
+        store: Optional EvaluationStore instance (uses global if not provided)
+    """
+    if not hasattr(metrics, 'score'):
+        return
+
+    # Build full trace with reasoning
+    trace_builder = {
+        'script': evaluator.build_script_trace,
+        'voice': evaluator.build_voice_trace,
+        'pacing': evaluator.build_pacing_trace,
+        'bgm': evaluator.build_bgm_trace,
+        'audio_mix': evaluator.build_audio_mix_trace,
+        'video': evaluator.build_video_trace,
+        'ending': evaluator.build_ending_trace,
+    }
+
+    trace = None
+    if dimension in trace_builder:
+        try:
+            trace = trace_builder[dimension]()
+        except Exception as e:
+            print(f"[Pipeline] Warning: Failed to build {dimension} trace: {e}")
+
+    score = int(metrics.score())
+    grade = evaluator.metrics.get_grade(score)
+    issues = getattr(metrics, 'issues', [])
+
+    # Update progress stream with full trace
+    if progress:
+        if trace:
+            progress.update_quality_trace(dimension, trace.to_dict())
+        else:
+            progress.update_quality_dimension(dimension, score, grade, 'complete', issues)
+
+        # Add any issues to the overall list
+        for issue in issues:
+            progress.add_quality_issue(f"[{dimension}] {issue}")
+
+    # Persist trace to SQLite
+    if trace:
+        try:
+            eval_store = store or get_evaluation_store()
+            eval_store.save_trace(job_id, trace)
+
+            # Also persist issues
+            for issue in issues:
+                severity = "error" if any(w in issue.lower() for w in ["fail", "error", "missing"]) else "warning"
+                eval_store.add_issue(job_id, dimension, severity, issue)
+        except Exception as e:
+            print(f"[Pipeline] Warning: Failed to persist {dimension} trace: {e}")
 
 
 class NormalPipeline:
@@ -107,6 +181,12 @@ class NormalPipeline:
         self._music_manager = None
         self._image_manager = None
 
+        # Quality evaluator (created during run())
+        self._evaluator = None
+
+        # Evaluation store for trace persistence
+        self._eval_store = None
+
     @property
     def narrator(self):
         """Lazy-load shared TTSNarrator instance."""
@@ -143,6 +223,130 @@ class NormalPipeline:
     def use_intelligent_bgm(self) -> bool:
         """Check if intelligent BGM system should be used."""
         return self.config.get("bgm", {}).get("use_intelligent", False)
+
+    def _ensure_evaluator(self) -> QualityEvaluator:
+        """Ensure quality evaluator exists, creating if needed."""
+        if self._evaluator is None:
+            self._evaluator = QualityEvaluator(
+                job_id=self.job_id,
+                output_dir=self.output_dir
+            )
+        return self._evaluator
+
+    def _ensure_eval_store(self) -> EvaluationStore:
+        """Ensure evaluation store exists, creating if needed."""
+        if self._eval_store is None:
+            self._eval_store = get_evaluation_store()
+        return self._eval_store
+
+    async def _evaluate_script_quality(
+        self,
+        script: Dict[str, Any],
+        progress: Optional[ProgressStream]
+    ) -> None:
+        """Evaluate script quality immediately after enhancement (~27% progress)."""
+        evaluator = self._ensure_evaluator()
+        store = self._ensure_eval_store()
+        if progress:
+            progress.set_quality_evaluating('script')
+        loop = asyncio.get_event_loop()
+        metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_script(script)
+        )
+        _update_quality_dimension(evaluator, progress, 'script', metrics, self.job_id, store)
+
+    async def _evaluate_voice_quality(
+        self,
+        tts_results: List[Dict[str, Any]],
+        progress: Optional[ProgressStream]
+    ) -> None:
+        """Evaluate voice and pacing quality after TTS completes (~50% progress)."""
+        evaluator = self._ensure_evaluator()
+        store = self._ensure_eval_store()
+        loop = asyncio.get_event_loop()
+
+        # Evaluate voice
+        if progress:
+            progress.set_quality_evaluating('voice')
+        voice_metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_voice(tts_results)
+        )
+        _update_quality_dimension(evaluator, progress, 'voice', voice_metrics, self.job_id, store)
+
+        # Evaluate pacing
+        if progress:
+            progress.set_quality_evaluating('pacing')
+        pacing_metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_pacing(tts_results, None)
+        )
+        _update_quality_dimension(evaluator, progress, 'pacing', pacing_metrics, self.job_id, store)
+
+    async def _evaluate_bgm_quality(
+        self,
+        bgm_results: List[Dict[str, Any]],
+        progress: Optional[ProgressStream]
+    ) -> None:
+        """Evaluate BGM quality after BGM generation completes (~60% progress)."""
+        evaluator = self._ensure_evaluator()
+        store = self._ensure_eval_store()
+        if progress:
+            progress.set_quality_evaluating('bgm')
+        loop = asyncio.get_event_loop()
+        metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_bgm(bgm_results, None)
+        )
+        _update_quality_dimension(evaluator, progress, 'bgm', metrics, self.job_id, store)
+
+    async def _evaluate_audio_quality(
+        self,
+        script: Dict[str, Any],
+        final_audio: str,
+        progress: Optional[ProgressStream]
+    ) -> None:
+        """Evaluate audio mix, ending, and duration after mixing (~85% progress)."""
+        if not final_audio:
+            return
+
+        evaluator = self._ensure_evaluator()
+        store = self._ensure_eval_store()
+        loop = asyncio.get_event_loop()
+
+        # Evaluate audio mix
+        if progress:
+            progress.set_quality_evaluating('audio_mix')
+        audio_mix_metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_audio_mix(final_audio)
+        )
+        _update_quality_dimension(evaluator, progress, 'audio_mix', audio_mix_metrics, self.job_id, store)
+
+        # Evaluate ending
+        if progress:
+            progress.set_quality_evaluating('ending')
+        ending_metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_ending(final_audio)
+        )
+        _update_quality_dimension(evaluator, progress, 'ending', ending_metrics, self.job_id, store)
+
+    async def _evaluate_video_quality(
+        self,
+        final_video: str,
+        final_audio: str,
+        image_results: List[Dict[str, Any]],
+        progress: Optional[ProgressStream]
+    ) -> None:
+        """Evaluate video quality after video assembly (~95% progress)."""
+        if not final_video or final_video == final_audio:
+            return
+
+        evaluator = self._ensure_evaluator()
+        store = self._ensure_eval_store()
+        if progress:
+            progress.set_quality_evaluating('video')
+        loop = asyncio.get_event_loop()
+        metrics = await loop.run_in_executor(
+            None, lambda: evaluator.analyze_video(final_video, image_results)
+        )
+        _update_quality_dimension(evaluator, progress, 'video', metrics, self.job_id, store)
 
     async def run(
         self,
@@ -255,6 +459,16 @@ class NormalPipeline:
         import time
 
         try:
+            # Initialize job record in evaluation store
+            store = self._ensure_eval_store()
+            prompt = content.text[:200] if content.text else None
+            store.create_job(
+                job_id=self.job_id,
+                mode="normal",
+                prompt=prompt,
+                output_dir=str(self.output_dir)
+            )
+
             stage_timings = {}
 
             # Stage 1: Quick script enhancement (25-35s)
@@ -269,6 +483,9 @@ class NormalPipeline:
                 hook_preview = script.get("hook", {}).get("text", "")[:100]
                 progress.scripting("Script enhanced!", preview=hook_preview)
 
+            # INCREMENTAL QUALITY: Evaluate script immediately after enhancement (~27%)
+            await self._evaluate_script_quality(script, progress)
+
             # Fire-and-forget: notify callback that script is ready (for trailer generation)
             if on_script_ready:
                 try:
@@ -282,6 +499,8 @@ class NormalPipeline:
             stage_timings.update(asset_timings)
             stage_timings['total'] = round(time.time() - start_time, 1)
 
+            duration = time.time() - start_time
+
             # Stage 5: Quality evaluation (with incremental progress updates)
             quality_report = await self._evaluate_quality(
                 script=script,
@@ -291,9 +510,8 @@ class NormalPipeline:
                 final_audio=final_audio,
                 final_video=final_video,
                 progress=progress,
+                duration_seconds=duration,
             )
-
-            duration = time.time() - start_time
 
             if progress:
                 # Inject asset sub-timings into phase_durations for frontend
@@ -321,6 +539,13 @@ class NormalPipeline:
             duration = time_module.time() - start_time
             if progress:
                 progress.error(str(e))
+
+            # Mark job as failed in evaluation store
+            try:
+                store = self._ensure_eval_store()
+                store.fail_job(self.job_id, str(e))
+            except Exception:
+                pass  # Don't fail on store error
 
             return NormalPipelineResult(
                 success=False,
@@ -538,6 +763,10 @@ class NormalPipeline:
         timings['tts'] = round(time.time() - t0, 1)
         timings['bgm'] = round(time.time() - t0, 1)
 
+        # INCREMENTAL QUALITY: Evaluate voice, pacing, and BGM (~50% progress)
+        await self._evaluate_voice_quality(tts_results, progress)
+        await self._evaluate_bgm_quality(bgm_results, progress)
+
         # Start mixing immediately (images may still be generating)
         if progress:
             progress.mixing_audio("Mixing audio...")
@@ -548,6 +777,9 @@ class NormalPipeline:
         image_results, final_audio = await asyncio.gather(image_task, mix_task)
         timings['images'] = round(time.time() - t0, 1)
         timings['mixing'] = round(time.time() - mix_start, 1)
+
+        # INCREMENTAL QUALITY: Evaluate audio_mix, ending, duration (~85% progress)
+        await self._evaluate_audio_quality(script, final_audio, progress)
 
         # Cleanup executors
         tts_executor.shutdown()
@@ -564,6 +796,9 @@ class NormalPipeline:
             print(f"[NormalPipeline] Video assembly failed, returning audio: {video_err}")
             final_video = final_audio
         timings['video_assembly'] = round(time.time() - video_start, 1)
+
+        # INCREMENTAL QUALITY: Evaluate video (~95% progress)
+        await self._evaluate_video_quality(final_video, final_audio, image_results, progress)
 
         return tts_results, bgm_results, image_results, final_audio, final_video, timings
 
@@ -1062,108 +1297,57 @@ class NormalPipeline:
         final_audio: str,
         final_video: str,
         progress: Optional[ProgressStream] = None,
+        duration_seconds: float = 0.0,
     ) -> Dict[str, Any]:
         """
-        Evaluate podcast quality across all dimensions with incremental updates.
+        Generate final quality report from incrementally-evaluated metrics.
 
-        Sends real-time quality updates via progress stream as each dimension
-        is evaluated, enabling the frontend to show scores as they become available.
+        NOTE: Individual quality dimensions (script, voice, pacing, bgm, audio_mix,
+        ending, video) are now evaluated incrementally during their
+        respective pipeline stages. This method builds the final trace report,
+        saves to JSON, and updates the job in the evaluation store.
 
         Args:
-            script: Enhanced script
-            tts_results: TTS generation results
-            bgm_results: BGM generation results
-            image_results: Image generation results
-            final_audio: Path to final audio
-            final_video: Path to final video
-            progress: Optional progress stream for real-time quality updates
+            script: Enhanced script (used for any missing evaluations)
+            tts_results: TTS generation results (unused - already evaluated)
+            bgm_results: BGM generation results (unused - already evaluated)
+            image_results: Image generation results (unused - already evaluated)
+            final_audio: Path to final audio (unused - already evaluated)
+            final_video: Path to final video (unused - already evaluated)
+            progress: Optional progress stream for recommendations
+            duration_seconds: Total pipeline duration for job record
 
         Returns:
             Quality report dictionary
         """
-        loop = asyncio.get_event_loop()
-
-        evaluator = QualityEvaluator(job_id=self.job_id, output_dir=self.output_dir)
-
-        def _update_progress_quality(dimension: str, metrics):
-            """Helper to update progress stream with quality score."""
-            if progress and hasattr(metrics, 'score'):
-                score = int(metrics.score())
-                grade = evaluator.metrics.get_grade(score)
-                issues = getattr(metrics, 'issues', [])
-                progress.update_quality_dimension(dimension, score, grade, 'complete', issues)
-                # Add any issues to the overall list
-                for issue in issues:
-                    progress.add_quality_issue(f"[{dimension}] {issue}")
-
         try:
-            # Evaluate script
-            if progress:
-                progress.set_quality_evaluating('script')
-            script_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_script(script))
-            _update_progress_quality('script', script_metrics)
+            # Get the evaluator that was used for incremental evaluations
+            evaluator = self._ensure_evaluator()
+            store = self._ensure_eval_store()
 
-            # Evaluate voice/TTS
-            if progress:
-                progress.set_quality_evaluating('voice')
-            voice_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_voice(tts_results))
-            _update_progress_quality('voice', voice_metrics)
-
-            # Evaluate BGM
-            if progress:
-                progress.set_quality_evaluating('bgm')
-            bgm_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_bgm(bgm_results, None))
-            _update_progress_quality('bgm', bgm_metrics)
-
-            # Evaluate pacing (derived from TTS results)
-            if progress:
-                progress.set_quality_evaluating('pacing')
-            pacing_metrics = await loop.run_in_executor(None, lambda: evaluator.analyze_pacing(tts_results, None))
-            _update_progress_quality('pacing', pacing_metrics)
-
-            if final_audio:
-                # Evaluate ending
-                if progress:
-                    progress.set_quality_evaluating('ending')
-                ending_metrics = await loop.run_in_executor(
-                    None,
-                    lambda: evaluator.analyze_ending(final_audio)
-                )
-                _update_progress_quality('ending', ending_metrics)
-
-                # Evaluate audio mix
-                if progress:
-                    progress.set_quality_evaluating('audio_mix')
-                audio_mix_metrics = await loop.run_in_executor(
-                    None,
-                    lambda: evaluator.analyze_audio_mix(final_audio)
-                )
-                _update_progress_quality('audio_mix', audio_mix_metrics)
-
-                # Evaluate duration
-                if progress:
-                    progress.set_quality_evaluating('duration')
-                target_duration = script.get("target_duration_minutes", 5)
-                duration_metrics = await loop.run_in_executor(
-                    None,
-                    lambda: evaluator.analyze_duration(final_audio, target_duration)
-                )
-                _update_progress_quality('duration', duration_metrics)
-
-            if final_video and final_video != final_audio:
-                # Evaluate video
-                if progress:
-                    progress.set_quality_evaluating('video')
-                video_metrics = await loop.run_in_executor(
-                    None,
-                    lambda: evaluator.analyze_video(final_video, image_results)
-                )
-                _update_progress_quality('video', video_metrics)
-
-            # Generate and save report
+            # Generate and save report from already-populated metrics
             report = evaluator.generate_report()
             evaluator.save_report(f"quality_report_{self.job_id}")
             evaluator.log_summary()
+
+            # Build and save trace report to JSON
+            try:
+                trace_report = evaluator.build_trace_report(mode="normal")
+                trace_report.job_id = self.job_id
+
+                # Save to output directory as quality_trace.json
+                trace_path = trace_report.save(self.output_dir)
+                print(f"[NormalPipeline] Quality trace saved to: {trace_path}")
+
+                # Complete job in evaluation store
+                store.complete_job(
+                    job_id=self.job_id,
+                    overall_score=trace_report.overall_score,
+                    overall_grade=trace_report.overall_grade,
+                    duration_seconds=duration_seconds
+                )
+            except Exception as e:
+                print(f"[NormalPipeline] Warning: Failed to save trace report: {e}")
 
             # Add recommendations to progress stream
             if progress:
@@ -1173,7 +1357,7 @@ class NormalPipeline:
             return report
 
         except Exception as e:
-            print(f"[NormalPipeline] Quality evaluation error: {e}")
+            print(f"[NormalPipeline] Quality report generation error: {e}")
             return {"error": str(e), "job_id": self.job_id}
 
 

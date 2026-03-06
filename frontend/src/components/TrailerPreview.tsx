@@ -1,8 +1,9 @@
 /**
- * TrailerPreview - Shows a looping preview trailer while full podcast generates.
+ * TrailerPreview - Shows a preview trailer while full podcast generates.
  *
  * Displays playable content at ~55s into generation, giving users something
  * to engage with while the full podcast (90s+) continues generating.
+ * The preview plays once and stops (no looping).
  */
 
 interface TrailerPreviewProps {
@@ -53,7 +54,6 @@ export function TrailerPreview({
           src={trailerUrl}
           controls
           autoPlay
-          loop
           playsInline
         >
           Your browser does not support the video tag.
@@ -65,7 +65,6 @@ export function TrailerPreview({
             src={trailerUrl}
             controls
             autoPlay
-            loop
           >
             Your browser does not support the audio tag.
           </audio>

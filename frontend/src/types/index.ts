@@ -134,6 +134,33 @@ export interface QualityScore {
 }
 
 /**
+ * Explainable quality trace for a single dimension.
+ * Provides human-readable reasoning and diagnostic data.
+ */
+export interface QualityTrace {
+  /** Quality dimension name */
+  dimension: string
+  /** Numeric score 0-100 */
+  score: number
+  /** Letter grade */
+  grade: string
+  /** 1-2 sentence human-readable explanation */
+  reasoning: string
+  /** What's working well (green indicators) */
+  strengths: string[]
+  /** What's holding the score back (orange indicators) */
+  weaknesses: string[]
+  /** Pro mode only - actionable fixes */
+  suggestions: string[]
+  /** Evaluation order (1=first, 8=last) */
+  sequence: number
+  /** Debug data - measurements that fed into score */
+  raw_metrics: Record<string, unknown>
+  /** True if reasoning was LLM-enhanced (Pro mode) */
+  enhanced: boolean
+}
+
+/**
  * Comprehensive quality report for a generation job.
  */
 export interface QualityReport {
@@ -143,6 +170,8 @@ export interface QualityReport {
   overall_grade: string | null
   /** Per-dimension quality scores */
   scores: QualityScore[]
+  /** Explainable quality traces with reasoning */
+  traces: QualityTrace[]
   /** All detected issues across dimensions */
   issues: string[]
   /** Actionable recommendations for improvement */
@@ -199,6 +228,8 @@ export interface ResultResponse {
   image_assets?: AssetInfo[]
   review_history?: ReviewEntry[]
   config_used?: ProConfig
+  /** Final quality evaluation report */
+  quality_report?: QualityReport
   error?: string
 }
 

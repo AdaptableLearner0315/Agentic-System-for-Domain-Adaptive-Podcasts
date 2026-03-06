@@ -391,6 +391,15 @@ class PipelineService:
             )
 
             if result.success:
+                # Store trailer image path in job metadata for main pipeline to use
+                if result.image_path:
+                    job = self.job_manager.get_job(job_id)
+                    if job:
+                        if job.result is None:
+                            job.result = {}
+                        job.result["trailer_image_path"] = result.image_path
+                        logger.info(f"Stored trailer image path for job {job_id}: {result.image_path}")
+
                 # Broadcast trailer ready via WebSocket
                 await self._broadcast_trailer_ready(job_id, result)
                 logger.info(f"Trailer ready for job {job_id}: {result.video_path or result.audio_path}")
@@ -574,12 +583,17 @@ class PipelineService:
             # Create trailer callback for fire-and-forget trailer generation
             on_script_ready = self._create_on_script_ready_callback(job_id)
 
+            # Construct expected trailer image path for reuse in main pipeline
+            # This matches the path used in trailer_service.py
+            trailer_image_path = str(self.output_dir / job_id / "trailer" / f"trailer_image_{job_id}.png")
+
             # Run pipeline
             pipeline = ProPipeline(config=config)
             result = await pipeline.run_with_content(
                 content,
                 progress=progress,
-                on_script_ready=on_script_ready
+                on_script_ready=on_script_ready,
+                trailer_image_path=trailer_image_path
             )
 
             return self._convert_result_to_dict(
@@ -654,11 +668,15 @@ class PipelineService:
                 emotion_image_alignment=config.emotion_image_alignment,
                 emotion_validation=config.emotion_validation,
             )
+            # Construct expected trailer image path for reuse in main pipeline
+            trailer_image_path = str(self.output_dir / job_id / "trailer" / f"trailer_image_{job_id}.png")
+
             pipeline = ProPipeline(config=pro_config)
             result = await pipeline.run_with_content(
                 content,
                 progress=progress,
-                on_script_ready=on_script_ready
+                on_script_ready=on_script_ready,
+                trailer_image_path=trailer_image_path
             )
 
             return self._convert_result_to_dict(

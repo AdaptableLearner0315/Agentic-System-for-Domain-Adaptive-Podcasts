@@ -440,6 +440,7 @@ class JobManager:
                     ],
                     review_history=result.get("review_history"),
                     config_used=result.get("config_used"),
+                    quality_report=result.get("quality_report"),
                     error=result.get("error"),
                 )
             elif job_state and job_state.status == JobStatus.FAILED:

@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
-import { ResultResponse } from '@/types'
+import { ResultResponse, QualityReport } from '@/types'
 import { API_URL } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 import { ChatPanel } from './interactive'
 import { ChatDrawer } from './ChatDrawer'
+import { QualityPanel } from './QualityPanel'
 
 interface OutputPlayerProps {
   /** Generation result data */
@@ -14,6 +15,8 @@ interface OutputPlayerProps {
   onReset: () => void
   /** Whether to show the interactive chat panel */
   showChat?: boolean
+  /** Quality metrics from generation (fallback to result.quality_report if not provided) */
+  quality?: QualityReport | null
 }
 
 /**
@@ -25,11 +28,14 @@ interface OutputPlayerProps {
  * @param result - Generation result with video URLs
  * @param onReset - Callback to reset the form
  */
-export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerProps) {
+export function OutputPlayer({ result, onReset, showChat = true, quality }: OutputPlayerProps) {
   const [activeTab, setActiveTab] = useState<'video' | 'details'>('video')
   const [isMuted, setIsMuted] = useState(true)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  // Use quality prop if provided, otherwise fallback to result.quality_report
+  const qualityData = quality ?? result.quality_report ?? null
 
   /**
    * Pause video when user interacts with chat.
@@ -74,60 +80,62 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
 
   return (
     <div className="w-full">
-      {/* Main content area */}
-      <div className="card space-y-6">
-        {/* Success Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
-              <svg
-                className="w-6 h-6 text-success"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
+      {/* Main layout: Video card on left, Quality panel on right */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Left: Main content card */}
+        <div className="flex-1 card space-y-6">
+          {/* Success Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
+                <svg
+                  className="w-6 h-6 text-success"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-xl font-bold">Your Podcast is Ready!</h3>
+                <p className="text-muted-foreground">
+                  {result.duration_seconds
+                    ? `Duration: ${formatDuration(result.duration_seconds)}`
+                    : 'Generation complete'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-xl font-bold">Your Podcast is Ready!</h3>
-              <p className="text-muted-foreground">
-                {result.duration_seconds
-                  ? `Duration: ${formatDuration(result.duration_seconds)}`
-                  : 'Generation complete'}
-              </p>
-            </div>
-          </div>
 
-          {/* Chat toggle button */}
-          {showChat && (
-            <button
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
-              onClick={toggleChat}
-              aria-label="Open chat"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            {/* Chat toggle button */}
+            {showChat && (
+              <button
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
+                onClick={toggleChat}
+                aria-label="Open chat"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
-              <span className="text-sm font-medium">Chat</span>
-            </button>
-          )}
-        </div>
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  />
+                </svg>
+                <span className="text-sm font-medium">Chat</span>
+              </button>
+            )}
+          </div>
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-border pb-2">
@@ -303,26 +311,56 @@ export function OutputPlayer({ result, onReset, showChat = true }: OutputPlayerP
         </div>
       )}
 
-      {/* Create Another */}
-      <div className="pt-4 border-t border-border">
-        <button className="btn-secondary w-full" onClick={onReset}>
-          <svg
-            className="w-4 h-4 mr-2"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          Create Another Podcast
-        </button>
+        {/* Create Another */}
+        <div className="pt-4 border-t border-border">
+          <button className="btn-secondary w-full" onClick={onReset}>
+            <svg
+              className="w-4 h-4 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Create Another Podcast
+          </button>
+        </div>
+        </div>
+
+        {/* Right: Quality Panel (desktop) */}
+        {qualityData && (
+          <div className="hidden lg:block">
+            <QualityPanel quality={qualityData} isComplete={true} />
+          </div>
+        )}
       </div>
-      </div>
+
+      {/* Mobile Quality Panel (shown below main content) */}
+      {qualityData && (
+        <div className="lg:hidden mt-6">
+          <details className="group">
+            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground flex items-center gap-2 mb-4">
+              <span>Quality Report</span>
+              <svg
+                className="w-4 h-4 transition-transform group-open:rotate-180"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </summary>
+            <div className="flex justify-center">
+              <QualityPanel quality={qualityData} isComplete={true} />
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* Chat Drawer - always mounted to preserve session */}
       {showChat && (

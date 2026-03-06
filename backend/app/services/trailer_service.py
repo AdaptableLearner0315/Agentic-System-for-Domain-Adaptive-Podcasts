@@ -32,6 +32,7 @@ class TrailerResult:
     success: bool
     video_path: Optional[str] = None
     audio_path: Optional[str] = None
+    image_path: Optional[str] = None  # For reuse by main pipeline
     duration_seconds: float = 0.0
     error: Optional[str] = None
 
@@ -159,6 +160,7 @@ class TrailerService:
                 success=True,
                 video_path=video_path,
                 audio_path=audio_path,
+                image_path=image_path,  # Store for reuse by main pipeline
                 duration_seconds=duration,
             )
 

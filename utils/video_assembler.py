@@ -451,7 +451,8 @@ def create_podcast_video(
         "-r", str(fps),
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",
+        # NOTE: -shortest flag removed to prevent audio cutoff at module transitions
+        # (Known issue #5 in CLAUDE.md)
         str(output_path),
     ])
 

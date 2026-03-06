@@ -164,6 +164,8 @@ class ProgressStream:
             dim: {'dimension': dim, 'score': None, 'grade': None, 'status': 'pending', 'issues': []}
             for dim in self.QUALITY_DIMENSIONS
         }
+        # Explainable quality traces (new)
+        self._quality_traces: Dict[str, Dict[str, Any]] = {}
         self._quality_issues: list = []
         self._quality_recommendations: list = []
 
@@ -177,7 +179,8 @@ class ProgressStream:
         score: Optional[int] = None,
         grade: Optional[str] = None,
         status: str = 'complete',
-        issues: Optional[list] = None
+        issues: Optional[list] = None,
+        trace: Optional[Dict[str, Any]] = None
     ):
         """
         Update quality score for a specific dimension.
@@ -188,6 +191,7 @@ class ProgressStream:
             grade: Letter grade (A, B+, C, etc.)
             status: Evaluation status (pending, evaluating, complete, error)
             issues: List of issues detected
+            trace: Optional QualityTrace dict with reasoning/strengths/weaknesses
         """
         if dimension in self._quality_scores:
             self._quality_scores[dimension] = {
@@ -197,6 +201,9 @@ class ProgressStream:
                 'status': status,
                 'issues': issues or [],
             }
+            # Store trace data if provided
+            if trace:
+                self._quality_traces[dimension] = trace
 
     def set_quality_evaluating(self, dimension: str):
         """Mark a quality dimension as currently being evaluated."""
@@ -213,12 +220,29 @@ class ProgressStream:
         if recommendation not in self._quality_recommendations:
             self._quality_recommendations.append(recommendation)
 
+    def update_quality_trace(self, dimension: str, trace: Dict[str, Any]):
+        """
+        Update the quality trace for a dimension with explainable data.
+
+        Args:
+            dimension: Quality dimension name
+            trace: QualityTrace dict containing reasoning, strengths, weaknesses, etc.
+        """
+        self._quality_traces[dimension] = trace
+        # Also update the score from the trace
+        if dimension in self._quality_scores and trace:
+            self._quality_scores[dimension].update({
+                'score': trace.get('score'),
+                'grade': trace.get('grade'),
+                'status': 'complete',
+            })
+
     def _get_quality_report(self) -> Dict[str, Any]:
         """
-        Build the current quality report.
+        Build the current quality report with explainable traces.
 
         Returns:
-            Dictionary containing quality report data
+            Dictionary containing quality report data including traces
         """
         # Calculate overall score from completed dimensions
         completed_scores = [
@@ -232,10 +256,17 @@ class ProgressStream:
             overall_score = None
             overall_grade = None
 
+        # Build traces list (sorted by sequence)
+        traces = sorted(
+            self._quality_traces.values(),
+            key=lambda t: t.get('sequence', 99)
+        )
+
         return {
             'overall_score': overall_score,
             'overall_grade': overall_grade,
             'scores': list(self._quality_scores.values()),
+            'traces': traces,
             'issues': self._quality_issues,
             'recommendations': self._quality_recommendations,
         }

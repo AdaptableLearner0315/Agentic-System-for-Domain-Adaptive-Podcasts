@@ -36,6 +36,37 @@ class QualityScore(BaseModel):
     issues: List[str] = Field(default_factory=list, description="Issues detected")
 
 
+class QualityTrace(BaseModel):
+    """
+    Explainable quality trace for a single dimension.
+
+    Provides human-readable reasoning, strengths, weaknesses, and suggestions
+    for understanding why a quality score is what it is.
+
+    Attributes:
+        dimension: Quality dimension name
+        score: Numeric score 0-100
+        grade: Letter grade
+        reasoning: 1-2 sentence human-readable explanation
+        strengths: What's working well (green indicators)
+        weaknesses: What's holding the score back (orange indicators)
+        suggestions: Pro mode only - actionable fixes
+        sequence: Evaluation order (1=first, 8=last)
+        raw_metrics: Debug data - measurements that fed into score
+        enhanced: True if reasoning was LLM-enhanced (Pro mode)
+    """
+    dimension: str = Field(..., description="Quality dimension name")
+    score: int = Field(0, ge=0, le=100, description="Score 0-100")
+    grade: str = Field("F", description="Letter grade")
+    reasoning: str = Field("", description="Human-readable explanation")
+    strengths: List[str] = Field(default_factory=list, description="What's working well")
+    weaknesses: List[str] = Field(default_factory=list, description="Areas for improvement")
+    suggestions: List[str] = Field(default_factory=list, description="Pro mode actionable fixes")
+    sequence: int = Field(0, ge=0, description="Evaluation order (1=first)")
+    raw_metrics: Dict[str, Any] = Field(default_factory=dict, description="Debug metrics")
+    enhanced: bool = Field(False, description="True if LLM-enhanced")
+
+
 class QualityReport(BaseModel):
     """
     Comprehensive quality report for a generation job.
@@ -44,12 +75,14 @@ class QualityReport(BaseModel):
         overall_score: Weighted overall score 0-100
         overall_grade: Letter grade for overall quality
         scores: List of per-dimension quality scores
+        traces: Full explainable traces for each dimension (includes reasoning)
         issues: All detected issues across dimensions
         recommendations: Actionable recommendations for improvement
     """
     overall_score: Optional[int] = Field(None, ge=0, le=100, description="Overall score")
     overall_grade: Optional[str] = Field(None, description="Overall letter grade")
     scores: List[QualityScore] = Field(default_factory=list, description="Per-dimension scores")
+    traces: List[QualityTrace] = Field(default_factory=list, description="Explainable quality traces")
     issues: List[str] = Field(default_factory=list, description="All detected issues")
     recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations")
 
@@ -145,6 +178,7 @@ class ResultResponse(BaseModel):
         assets: Generated assets (TTS, BGM, images)
         review_history: Director review history (Pro mode)
         config_used: Configuration used for generation
+        quality_report: Final quality evaluation report
     """
     job_id: str
     success: bool
@@ -159,6 +193,7 @@ class ResultResponse(BaseModel):
     image_assets: List[AssetInfo] = Field(default_factory=list)
     review_history: Optional[List[Dict[str, Any]]] = None
     config_used: Optional[Dict[str, Any]] = None
+    quality_report: Optional[QualityReport] = Field(None, description="Final quality evaluation report")
     error: Optional[str] = None
 
 

@@ -436,7 +436,7 @@ export default function Home() {
         {/* Output Player */}
         {isComplete && result && (
           <div className="animate-in">
-            <OutputPlayer result={result} onReset={handleReset} />
+            <OutputPlayer result={result} onReset={handleReset} quality={quality} />
           </div>
         )}
       </div>

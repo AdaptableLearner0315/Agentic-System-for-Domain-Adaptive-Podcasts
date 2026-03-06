@@ -8,6 +8,58 @@ Development rules and conventions for the Nell Podcast Enhancement System.
 
 ---
 
+## MUST READ - Workflow Orchestration
+
+### 1. Plan Mode Default
+- Enter plan mode for ANY non-trivial task (5+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately - don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Use Subagents Liberally
+- Use subagents liberally to keep main context window clean
+- Spawn explore agents for research (checking how X works) instead of bloating main context
+- For complex problems, throw more compute at it via subagents
+- Review all outputs from subagents before presenting
+
+### 3. Self-Improvement Loop
+- After correction from the user, update `tasks/lessons.md` with the pattern
+- Write fixes for yourself that prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review all sessions to export learnings
+
+### 4. Verification Before Done
+- Never mark a task complete without proving it works
+- Diff before releases: make sure your changes work when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correct behavior
+
+### 5. Demand Elegance (Balanced)
+- When you catch yourself fixing, ask "Is there a more elegant solution?"
+- If a fix feels hacky: "knowing everything I know now, implement the elegant solution"
+- Resist gold-plating - simple and working beats clever and broken
+- Challenge your own work before presenting it
+
+### 6. Autonomous Bug Fixing
+- On autonomous bug reports: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests - then resolve them
+- Zero context switching required from the user
+- No fix failing CI tests without being told how
+
+### Workflow Priorities
+- **Define Problem**: Write plan to `tasks/todo.md` with checklist items
+- **Verify Prompt**: Check in before starting implementation
+- **Evaluate Changes**: High-level summary at each step
+- **Ruthless Simplification**: Strip away unnecessary complexity
+- **Capture Lessons**: Update `tasks/lessons.md` after corrections
+
+### Core Principles
+- **Simplicity First**: Make every change as simple as possible. Inspect current code.
+- **Self-Improving**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Footprint**: Changes should only touch what's necessary. Avoid introducing loops.
+
+---
+
 ## Quick Reference
 
 ### Start Development Servers
