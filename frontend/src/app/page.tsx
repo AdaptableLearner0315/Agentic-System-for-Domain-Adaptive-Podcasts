@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Header } from '@/components/Header'
 import { PromptInput } from '@/components/PromptInput'
 import { FileUpload } from '@/components/FileUpload'
@@ -10,9 +11,10 @@ import { OutputPlayer } from '@/components/OutputPlayer'
 import { TrailerPreview } from '@/components/TrailerPreview'
 import { QualityPanel } from '@/components/QualityPanel'
 import { useGeneration } from '@/hooks/useGeneration'
+import { useSeries } from '@/hooks/useSeries'
 import { suggestTopic } from '@/lib/api'
 import { STORAGE_KEYS } from '@/lib/constants'
-import { PipelineMode, DurationOption, ProgressResponse, QualityReport } from '@/types'
+import { PipelineMode, DurationOption, ProgressResponse, QualityReport, SeriesType, EpisodeLength } from '@/types'
 
 /**
  * Collapsible section component for stacked card layout.
@@ -155,14 +157,26 @@ function GeneratingView({
  * Suno AI-inspired centered stacked card layout with collapsible sections.
  */
 export default function Home() {
-  // Form state
+  const router = useRouter()
+
+  // Creation mode: single podcast or series
+  const [creationMode, setCreationMode] = useState<'single' | 'series'>('single')
+
+  // Form state (shared)
   const [prompt, setPrompt] = useState('')
   const [guidance, setGuidance] = useState('')
   const [mode, setMode] = useState<PipelineMode>('normal')
+  const [isSuggestingTopic, setIsSuggestingTopic] = useState(false)
+
+  // Single podcast state
   const [duration, setDuration] = useState<DurationOption>(5)
   const [conversationalStyle, setConversationalStyle] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
-  const [isSuggestingTopic, setIsSuggestingTopic] = useState(false)
+
+  // Series state
+  const [episodeCount, setEpisodeCount] = useState(5)
+  const [episodeLength, setEpisodeLength] = useState<EpisodeLength>('short')
+  const [seriesType, setSeriesType] = useState<SeriesType>('documentary')
 
   // Generation hook handles all API interactions
   const {
@@ -176,6 +190,9 @@ export default function Home() {
     cancelGeneration,
     reset,
   } = useGeneration()
+
+  // Series hook for series creation
+  const { create: createSeries, isCreating: isCreatingSeries, error: seriesError } = useSeries()
 
   // Track whether user dismissed trailer to view full result
   const [showTrailer, setShowTrailer] = useState(true)
@@ -250,11 +267,35 @@ export default function Home() {
     }
   }
 
+  /**
+   * Handle series creation.
+   */
+  const handleCreateSeries = async () => {
+    if (!prompt) return
+
+    try {
+      const series = await createSeries({
+        prompt,
+        episode_count: episodeCount,
+        episode_length: episodeLength,
+        series_type: seriesType,
+        mode,
+        guidance: guidance || undefined,
+      })
+      // Navigate to series detail page for outline approval
+      router.push(`/series/${series.id}`)
+    } catch {
+      // Error handled by hook
+    }
+  }
+
   // Determine UI state
   const isGenerating = status === 'running' || status === 'pending'
   const isComplete = status === 'completed'
   const hasFailed = status === 'failed'
-  const canGenerate = (prompt || uploadedFiles.length > 0) && !isGenerating
+  const canGenerateSingle = (prompt || uploadedFiles.length > 0) && !isGenerating
+  const canCreateSeries = prompt && !isCreatingSeries
+  const canSubmit = creationMode === 'single' ? canGenerateSingle : canCreateSeries
 
   return (
     <main className="min-h-screen">
@@ -274,6 +315,28 @@ export default function Home() {
         {/* Form View - shown when not generating and not complete */}
         {!isGenerating && !isComplete && (
           <div className="space-y-5 animate-slide-in-up">
+            {/* Creation Mode Toggle */}
+            <div className="flex justify-center gap-2">
+              <button
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors
+                  ${creationMode === 'single'
+                    ? 'bg-primary/20 text-primary border border-primary/30'
+                    : 'bg-secondary/80 text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setCreationMode('single')}
+              >
+                Single Podcast
+              </button>
+              <button
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors
+                  ${creationMode === 'series'
+                    ? 'bg-primary/20 text-primary border border-primary/30'
+                    : 'bg-secondary/80 text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setCreationMode('series')}
+              >
+                Series
+              </button>
+            </div>
+
             {/* Stacked Card */}
             <div className="card">
               {/* Section: Describe your podcast */}
@@ -303,36 +366,78 @@ export default function Home() {
                       >
                         {mode === 'normal' ? 'Normal' : 'Pro'}
                       </button>
-                      {/* Multiple Hosts Toggle */}
-                      <button
-                        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors
-                          ${conversationalStyle
-                            ? 'text-cyan-400 bg-cyan-400/10'
-                            : 'text-muted-foreground bg-secondary/80 hover:bg-secondary hover:text-foreground'
-                          }`}
-                        onClick={() => setConversationalStyle(!conversationalStyle)}
-                        aria-label="Toggle multiple hosts"
-                        aria-pressed={conversationalStyle}
-                        title={conversationalStyle
-                          ? "Multiple hosts: ON (dynamic multi-host dialogue)"
-                          : "Multiple hosts: OFF (click to enable multi-host format)"}
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        <span className="hidden sm:inline">Multiple Hosts</span>
-                      </button>
-                      {/* Duration Dropdown */}
-                      <DurationDropdown
-                        duration={duration}
-                        onDurationChange={setDuration}
-                        disabled={false}
-                      />
+
+                      {creationMode === 'single' ? (
+                        <>
+                          {/* Multiple Hosts Toggle */}
+                          <button
+                            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors
+                              ${conversationalStyle
+                                ? 'text-cyan-400 bg-cyan-400/10'
+                                : 'text-muted-foreground bg-secondary/80 hover:bg-secondary hover:text-foreground'
+                              }`}
+                            onClick={() => setConversationalStyle(!conversationalStyle)}
+                            aria-label="Toggle multiple hosts"
+                            aria-pressed={conversationalStyle}
+                            title={conversationalStyle
+                              ? "Multiple hosts: ON (dynamic multi-host dialogue)"
+                              : "Multiple hosts: OFF (click to enable multi-host format)"}
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            <span className="hidden sm:inline">Multiple Hosts</span>
+                          </button>
+                          {/* Duration Dropdown */}
+                          <DurationDropdown
+                            duration={duration}
+                            onDurationChange={setDuration}
+                            disabled={false}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          {/* Episode Count Dropdown */}
+                          <select
+                            className="px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            value={episodeCount}
+                            onChange={(e) => setEpisodeCount(Number(e.target.value))}
+                            title="Number of episodes in the series"
+                          >
+                            {[3, 4, 5, 6, 8, 10, 12, 15, 20].map(n => (
+                              <option key={n} value={n}>{n} episodes</option>
+                            ))}
+                          </select>
+
+                          {/* Episode Length Dropdown */}
+                          <select
+                            className="px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            value={episodeLength}
+                            onChange={(e) => setEpisodeLength(e.target.value as EpisodeLength)}
+                            title="Duration of each episode"
+                          >
+                            <option value="short">Short (5-10 min)</option>
+                            <option value="medium">Medium (10-20 min)</option>
+                          </select>
+
+                          {/* Series Type Dropdown */}
+                          <select
+                            className="px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            value={seriesType}
+                            onChange={(e) => setSeriesType(e.target.value as SeriesType)}
+                            title="Style of series storytelling"
+                          >
+                            <option value="documentary">Documentary</option>
+                            <option value="narrative">Narrative</option>
+                            <option value="hybrid">Hybrid</option>
+                          </select>
+                        </>
+                      )}
                     </div>
                     {/* Right: Suggest Topic */}
                     <button
-                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-secondary/80 hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                       onClick={handleSuggestTopic}
                       disabled={isSuggestingTopic}
                       aria-label="Suggest a topic"
@@ -351,7 +456,7 @@ export default function Home() {
                           d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
                         />
                       </svg>
-                      <span className="hidden sm:inline text-muted-foreground">Inspire me</span>
+                      <span className="hidden sm:inline text-muted-foreground whitespace-nowrap">Surprise me</span>
                     </button>
                   </div>
                 </div>
@@ -368,27 +473,29 @@ export default function Home() {
                 />
               </Section>
 
-              {/* Section: Upload Files — collapsed by default */}
-              <Section title="Upload Files" defaultOpen={false}>
-                <FileUpload
-                  onFileUploaded={handleFileUploaded}
-                  onFileRemoved={handleFileRemoved}
-                  uploadedFiles={uploadedFiles}
-                  disabled={false}
-                />
-              </Section>
+              {/* Section: Upload Files — collapsed by default, single mode only */}
+              {creationMode === 'single' && (
+                <Section title="Upload Files" defaultOpen={false}>
+                  <FileUpload
+                    onFileUploaded={handleFileUploaded}
+                    onFileRemoved={handleFileRemoved}
+                    uploadedFiles={uploadedFiles}
+                    disabled={false}
+                  />
+                </Section>
+              )}
             </div>
 
             {/* Create Button */}
             <button
               className="btn-create"
-              onClick={handleGenerate}
-              disabled={!canGenerate}
+              onClick={creationMode === 'single' ? handleGenerate : handleCreateSeries}
+              disabled={!canSubmit}
             >
-              Create Podcast
+              {creationMode === 'single' ? 'Create Podcast' : (isCreatingSeries ? 'Creating Series...' : 'Create Series')}
             </button>
 
-            {/* Error Message */}
+            {/* Error Message - Single Podcast */}
             {hasFailed && error && (() => {
               const { title, message } = formatErrorMessage(error)
               return (
@@ -418,6 +525,31 @@ export default function Home() {
                 </div>
               )
             })()}
+
+            {/* Error Message - Series */}
+            {seriesError && (
+              <div className="card border-destructive/50 bg-destructive/10">
+                <div className="flex items-start gap-3">
+                  <svg
+                    className="w-5 h-5 text-destructive mt-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <div>
+                    <h3 className="font-medium text-destructive">Series Creation Failed</h3>
+                    <p className="text-sm text-muted-foreground mt-1">{seriesError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
