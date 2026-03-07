@@ -349,7 +349,7 @@ export default function Home() {
                     disabled={false}
                   />
                   {/* Inline controls at bottom of textarea */}
-                  <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
+                  <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between flex-wrap gap-y-2">
                     {/* Left: Mode and Style toggles */}
                     <div className="flex items-center gap-2">
                       {/* Mode Toggle */}
