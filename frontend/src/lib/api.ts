@@ -24,6 +24,13 @@ import type {
   UserMemoryPreferences,
   AdaptiveThresholdData,
   JobLogs,
+  // Series types
+  CreateSeriesRequest,
+  ApproveOutlineRequest,
+  GenerateEpisodeRequest,
+  Series,
+  Episode,
+  SeriesListResponse,
 } from '@/types'
 
 // API base URL from environment
@@ -71,7 +78,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 
     throw new ApiError(
-      errorData?.message || `Request failed: ${response.statusText}`,
+      errorData?.detail || errorData?.message || `Request failed: ${response.statusText}`,
       response.status,
       errorData?.details
     )
@@ -217,7 +224,7 @@ export async function uploadFile(
       // Response may not be JSON
     }
     throw new ApiError(
-      errorData?.message || 'Upload failed',
+      errorData?.detail || errorData?.message || 'Upload failed',
       response.status,
       errorData?.details
     )
@@ -419,7 +426,7 @@ export async function sendVoiceMessage(
       // Response may not be JSON
     }
     throw new ApiError(
-      errorData?.message || 'Voice upload failed',
+      errorData?.detail || errorData?.message || 'Voice upload failed',
       response.status,
       errorData?.details
     )
@@ -622,4 +629,130 @@ export async function clearUserMemory(userId?: string): Promise<void> {
   await request<{ message: string }>(`/api/user/memory${params}`, {
     method: 'DELETE',
   })
+}
+
+// =============================================================================
+// Series Endpoints
+// =============================================================================
+
+/**
+ * Create a new podcast series.
+ *
+ * The system analyzes your prompt to detect genre, era, and style,
+ * then generates a complete series outline with episode summaries.
+ *
+ * @param data - Series creation request
+ * @returns Created series in 'draft' status
+ */
+export async function createSeries(data: CreateSeriesRequest): Promise<Series> {
+  return request<Series>('/api/series', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
+ * Get series details by ID.
+ *
+ * @param seriesId - Series identifier
+ * @returns Full series information
+ */
+export async function getSeries(seriesId: string): Promise<Series> {
+  return request<Series>(`/api/series/${seriesId}`)
+}
+
+/**
+ * Approve or modify a series outline.
+ *
+ * On approval, series audio assets are generated and status changes to 'in_progress'.
+ *
+ * @param seriesId - Series identifier
+ * @param data - Approval request with optional modifications
+ * @returns Updated series
+ */
+export async function approveSeriesOutline(
+  seriesId: string,
+  data: ApproveOutlineRequest
+): Promise<Series> {
+  return request<Series>(`/api/series/${seriesId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
+ * Generate the next episode in a series.
+ *
+ * @param seriesId - Series identifier
+ * @param data - Optional episode generation request
+ * @returns Generation status with job tracking info
+ */
+export async function generateSeriesEpisode(
+  seriesId: string,
+  data?: GenerateEpisodeRequest
+): Promise<{
+  job_id: string
+  series_id: string
+  episode_number: number
+  episode_id: string
+  status: string
+  previously_on?: string
+  guidance?: string
+  cliffhanger_type?: string
+  message: string
+}> {
+  return request(`/api/series/${seriesId}/generate`, {
+    method: 'POST',
+    body: JSON.stringify(data || {}),
+  })
+}
+
+/**
+ * Get details of a specific episode.
+ *
+ * @param seriesId - Series identifier
+ * @param episodeNumber - Episode number
+ * @returns Episode details
+ */
+export async function getSeriesEpisode(
+  seriesId: string,
+  episodeNumber: number
+): Promise<Episode> {
+  return request<Episode>(`/api/series/${seriesId}/episodes/${episodeNumber}`)
+}
+
+/**
+ * Delete/cancel a series.
+ *
+ * Episodes already generated are preserved.
+ *
+ * @param seriesId - Series identifier
+ */
+export async function deleteSeries(seriesId: string): Promise<void> {
+  await request(`/api/series/${seriesId}`, {
+    method: 'DELETE',
+  })
+}
+
+/**
+ * List all series with pagination.
+ *
+ * @param page - Page number
+ * @param pageSize - Items per page
+ * @param status - Optional status filter
+ * @returns Series list response
+ */
+export async function listSeries(
+  page: number = 1,
+  pageSize: number = 20,
+  status?: string
+): Promise<SeriesListResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (status) {
+    params.append('status', status)
+  }
+  return request<SeriesListResponse>(`/api/series?${params}`)
 }

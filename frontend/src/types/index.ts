@@ -118,6 +118,22 @@ export interface URLExtractionRequest {
 export type QualityStatus = 'pending' | 'evaluating' | 'complete' | 'error'
 
 /**
+ * A quality issue detected during evaluation.
+ */
+export interface QualityIssue {
+  /** Quality dimension where issue was detected */
+  dimension: string
+  /** Issue severity: error, warning, info */
+  severity: string
+  /** Human-readable issue description */
+  message: string
+  /** Optional timestamp in milliseconds */
+  timestamp_ms?: number
+  /** Additional issue details */
+  details?: Record<string, unknown>
+}
+
+/**
  * Quality score for a single dimension.
  */
 export interface QualityScore {
@@ -173,7 +189,7 @@ export interface QualityReport {
   /** Explainable quality traces with reasoning */
   traces: QualityTrace[]
   /** All detected issues across dimensions */
-  issues: string[]
+  issues: QualityIssue[]
   /** Actionable recommendations for improvement */
   recommendations: string[]
 }
@@ -295,8 +311,9 @@ export interface HealthResponse {
  * Standard error response.
  */
 export interface ErrorResponse {
-  error: string
-  message: string
+  error?: string
+  message?: string
+  detail?: string  // FastAPI HTTPException format
   details?: Record<string, unknown>
 }
 
@@ -543,3 +560,156 @@ export interface JobLogs {
 // =============================================================================
 
 export * from './interactive'
+
+// =============================================================================
+// Series Types
+// =============================================================================
+
+/**
+ * Type of podcast series.
+ */
+export type SeriesType = 'documentary' | 'narrative' | 'hybrid'
+
+/**
+ * Target episode duration.
+ */
+export type EpisodeLength = 'short' | 'medium'
+
+/**
+ * Status of a series.
+ */
+export type SeriesStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled'
+
+/**
+ * Status of an episode.
+ */
+export type EpisodeStatus = 'pending' | 'generating' | 'completed' | 'failed'
+
+/**
+ * Types of cliffhangers for episode endings.
+ */
+export type CliffhangerType = 'revelation' | 'twist' | 'question' | 'countdown' | 'promise'
+
+/**
+ * Request to create a new podcast series.
+ */
+export interface CreateSeriesRequest {
+  /** Topic or premise for the series */
+  prompt: string
+  /** Number of episodes (3-20) */
+  episode_count?: number
+  /** Episode length: 'short' (5-10min) or 'medium' (10-20min) */
+  episode_length?: EpisodeLength
+  /** Series type: 'documentary', 'narrative', or 'hybrid' */
+  series_type?: SeriesType
+  /** Additional instructions for series style/content */
+  guidance?: string
+  /** Pipeline mode for episode generation */
+  mode?: PipelineMode
+}
+
+/**
+ * Request to approve or modify a series outline.
+ */
+export interface ApproveOutlineRequest {
+  /** Whether to approve the outline */
+  approved: boolean
+  /** Optional modifications to apply */
+  modifications?: Record<string, unknown>
+}
+
+/**
+ * Request to generate a specific episode.
+ */
+export interface GenerateEpisodeRequest {
+  /** Episode number to generate (optional, defaults to next) */
+  episode_number?: number
+}
+
+/**
+ * Style DNA summary for display.
+ */
+export interface StyleDNA {
+  era: string
+  genre: string
+  geography?: string
+  tone: string
+  music_style: string
+  voice_style: string
+}
+
+/**
+ * Episode summary in series outline.
+ */
+export interface EpisodeSummary {
+  episode_number: number
+  title: string
+  premise: string
+  cliffhanger_type?: CliffhangerType
+  status: EpisodeStatus
+}
+
+/**
+ * Series outline response for display/approval.
+ */
+export interface SeriesOutline {
+  title: string
+  description: string
+  episode_count: number
+  episode_length: EpisodeLength
+  series_type: SeriesType
+  overall_arc: string
+  themes: string[]
+  episodes: EpisodeSummary[]
+  style_dna: StyleDNA
+}
+
+/**
+ * Full episode details response.
+ */
+export interface Episode {
+  id: string
+  series_id: string
+  episode_number: number
+  title: string
+  status: EpisodeStatus
+  job_id?: string
+  previously_on?: string
+  cliffhanger?: string
+  cliffhanger_type?: CliffhangerType
+  output_path?: string
+  audio_path?: string
+  video_url?: string
+  audio_url?: string
+  duration_seconds?: number
+  created_at: string
+  completed_at?: string
+}
+
+/**
+ * Full series information response.
+ */
+export interface Series {
+  id: string
+  status: SeriesStatus
+  prompt: string
+  guidance?: string
+  mode: PipelineMode
+  outline: SeriesOutline
+  episodes: Episode[]
+  progress_percent: number
+  assets_generated: boolean
+  created_at: string
+  approved_at?: string
+  completed_at?: string
+}
+
+/**
+ * List of series response.
+ */
+export interface SeriesListResponse {
+  series: Series[]
+  total: number
+  page: number
+  page_size: number
+}
