@@ -73,15 +73,18 @@ const DEFAULT_CONFIG: Required<StreamingTranscriptConfig> = {
 /**
  * Check if Web Speech API is available.
  */
-function getSpeechRecognition(): typeof SpeechRecognition | null {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SpeechRecognitionConstructor = new () => any
+
+function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   if (typeof window === 'undefined') return null
 
   // Check for vendor prefixes
-  const SpeechRecognition =
-    (window as Window & { SpeechRecognition?: typeof globalThis.SpeechRecognition }).SpeechRecognition ||
-    (window as Window & { webkitSpeechRecognition?: typeof globalThis.SpeechRecognition }).webkitSpeechRecognition
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const win = window as any
+  const RecognitionAPI = win.SpeechRecognition || win.webkitSpeechRecognition
 
-  return SpeechRecognition || null
+  return RecognitionAPI || null
 }
 
 /**
@@ -121,7 +124,8 @@ export function useStreamingTranscript(
   const isSupported = SpeechRecognitionClass !== null
 
   // Refs
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
   const configRef = useRef<Required<StreamingTranscriptConfig>>({
     ...DEFAULT_CONFIG,
     ...config,
@@ -180,7 +184,8 @@ export function useStreamingTranscript(
       // This handles the browser's automatic stops
     }
 
-    recognition.onerror = (event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (event: any) => {
       // Don't treat 'aborted' as an error (happens when we stop manually)
       if (event.error === 'aborted') return
 
@@ -188,7 +193,8 @@ export function useStreamingTranscript(
       setIsListening(false)
     }
 
-    recognition.onresult = (event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
       let final = ''
       let interim = ''
       let latestConfidence = 0

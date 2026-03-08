@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from .config import get_settings, Settings
-from .routes import pipelines, files, config, outputs, trailer, interactive, memory, quality
+from .routes import pipelines, files, config, outputs, trailer, interactive, memory, quality, series
 from .websockets import progress, interactive as interactive_ws
 from .models.responses import HealthResponse, ErrorResponse
 from .database.connection import init_db, close_db
@@ -171,6 +171,11 @@ def create_app() -> FastAPI:
         quality.router,
         prefix=f"{settings.api_prefix}/quality",
         tags=["Quality"]
+    )
+    app.include_router(
+        series.router,
+        prefix=f"{settings.api_prefix}/series",
+        tags=["Series"]
     )
 
     # Mount WebSocket routes

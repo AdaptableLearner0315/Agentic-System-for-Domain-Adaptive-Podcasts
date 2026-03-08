@@ -181,3 +181,98 @@ class ConfigUpdateRequest(BaseModel):
     default_voice: Optional[str] = None
     save_history: Optional[bool] = None
     custom_settings: Optional[Dict[str, Any]] = None
+
+
+# =============================================================================
+# Series Requests
+# =============================================================================
+
+class CreateSeriesRequest(BaseModel):
+    """
+    Request to create a new podcast series.
+
+    Attributes:
+        prompt: Topic/premise for the series
+        episode_count: Number of episodes (3-20)
+        episode_length: Target episode length (short: 5-10min, medium: 10-20min)
+        series_type: Type of series (documentary, narrative, hybrid)
+        guidance: Additional instructions for series generation
+        mode: Pipeline mode for episodes (normal, pro, ultra)
+    """
+    prompt: str = Field(
+        ...,
+        description="Topic or premise for the series",
+        example="The rise and fall of disco in 1970s New York"
+    )
+    episode_count: int = Field(
+        5,
+        ge=3,
+        le=20,
+        description="Number of episodes in the series"
+    )
+    episode_length: str = Field(
+        "short",
+        description="Episode length: 'short' (5-10min) or 'medium' (10-20min)"
+    )
+    series_type: str = Field(
+        "documentary",
+        description="Series type: 'documentary', 'narrative', or 'hybrid'"
+    )
+    guidance: Optional[str] = Field(
+        None,
+        description="Additional instructions for series style/content"
+    )
+    mode: str = Field(
+        "normal",
+        description="Pipeline mode for episode generation"
+    )
+
+    @validator("episode_length")
+    def validate_episode_length(cls, v: str) -> str:
+        """Validate episode length."""
+        if v.lower() not in ("short", "medium"):
+            raise ValueError("episode_length must be 'short' or 'medium'")
+        return v.lower()
+
+    @validator("series_type")
+    def validate_series_type(cls, v: str) -> str:
+        """Validate series type."""
+        if v.lower() not in ("documentary", "narrative", "hybrid"):
+            raise ValueError("series_type must be 'documentary', 'narrative', or 'hybrid'")
+        return v.lower()
+
+    @validator("mode")
+    def validate_mode(cls, v: str) -> str:
+        """Validate pipeline mode."""
+        if v.lower() not in ("normal", "pro", "ultra"):
+            raise ValueError("mode must be 'normal', 'pro', or 'ultra'")
+        return v.lower()
+
+
+class ApproveOutlineRequest(BaseModel):
+    """
+    Request to approve or modify a series outline.
+
+    Attributes:
+        approved: Whether the outline is approved
+        modifications: Optional modifications to episode details
+    """
+    approved: bool = Field(True, description="Whether to approve the outline")
+    modifications: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Modifications to apply (e.g., episode titles, premises)"
+    )
+
+
+class GenerateEpisodeRequest(BaseModel):
+    """
+    Request to generate a specific episode.
+
+    Attributes:
+        episode_number: Episode number to generate (optional, defaults to next)
+    """
+    episode_number: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Episode number to generate (defaults to next pending)"
+    )

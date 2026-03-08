@@ -904,7 +904,7 @@ class ProPipeline:
         script = None
         approved = False
         round_num = 0
-        max_rounds = self.config.max_review_rounds
+        max_rounds = max(1, self.config.max_review_rounds)  # Ensure at least 1 pass
 
         while not approved and round_num < max_rounds:
             round_num += 1
@@ -961,6 +961,10 @@ class ProPipeline:
                     )
             else:
                 feedback = review.get("feedback", "")
+
+        # Defensive check: ensure script was generated
+        if script is None:
+            raise ValueError("Script enhancement failed: no script was generated")
 
         # Add review history to script
         script["review_history"] = review_history
@@ -1303,8 +1307,17 @@ class ProPipeline:
         if failed_tts > 0:
             print(f"[ProPipeline] Filtering {failed_tts} failed TTS items from mix")
 
-        # Filter out failed BGM items
-        valid_bgm = [r for r in bgm_results if r.get('path')]
+        # Filter out failed BGM items and normalize segment_id to module_id
+        valid_bgm = []
+        for bgm in bgm_results:
+            if not bgm.get('path'):
+                continue
+            entry = dict(bgm)
+            # Mixer expects module_id, but BGM generator uses segment_id
+            if 'module_id' not in entry and 'segment_id' in entry:
+                entry['module_id'] = entry['segment_id']
+            valid_bgm.append(entry)
+
         failed_bgm = len(bgm_results) - len(valid_bgm)
         if failed_bgm > 0:
             print(f"[ProPipeline] Filtering {failed_bgm} failed BGM items from mix")

@@ -470,7 +470,7 @@ export function QualityPanel({ quality, isComplete, onRegenerate }: QualityPanel
                 <ul className="space-y-1.5 max-h-24 overflow-y-auto">
                   {quality.issues.slice(0, 4).map((issue, idx) => (
                     <li key={idx} className="text-xs text-amber-200/80 pl-4 relative before:content-['•'] before:absolute before:left-1 before:text-amber-400">
-                      {issue}
+                      {issue.message}
                     </li>
                   ))}
                 </ul>
@@ -556,7 +556,7 @@ export function QualityPanel({ quality, isComplete, onRegenerate }: QualityPanel
           <div className="space-y-1.5">
             {quality.issues.slice(0, 2).map((issue, idx) => (
               <p key={idx} className="text-xs text-amber-400">
-                ! {issue}
+                ! {issue.message}
               </p>
             ))}
             {quality.recommendations.slice(0, 1).map((rec, idx) => (

@@ -120,6 +120,39 @@ from config.user_config import (
     run_config_wizard,
 )
 
+# Era profiles for series generation
+from config.era_profiles import (
+    ERA_PROFILES,
+    ERA_KEYWORDS,
+    get_era_profile,
+    detect_era_from_text,
+    get_all_eras,
+)
+
+# Genre templates for series generation
+from config.genre_templates import (
+    GENRE_TEMPLATES,
+    GENRE_KEYWORDS,
+    get_genre_template,
+    detect_genre_from_text,
+    get_arc_template,
+    get_all_genres,
+    get_cliffhanger_strategies,
+)
+
+# Cliffhanger prompts for series generation
+from config.cliffhanger_prompts import (
+    CLIFFHANGER_TYPES,
+    CLIFFHANGER_STRATEGIES,
+    get_cliffhanger_type,
+    get_cliffhanger_prompt,
+    get_audio_sting_prompt,
+    get_cliffhanger_strategy,
+    get_episode_cliffhanger_type,
+    PREVIOUSLY_ON_STYLES,
+    get_previously_on_prompt,
+)
+
 __all__ = [
     # Paths
     'BASE_DIR',
@@ -207,4 +240,28 @@ __all__ = [
     'get_default_config',
     'save_default_config',
     'run_config_wizard',
+    # Era profiles
+    'ERA_PROFILES',
+    'ERA_KEYWORDS',
+    'get_era_profile',
+    'detect_era_from_text',
+    'get_all_eras',
+    # Genre templates
+    'GENRE_TEMPLATES',
+    'GENRE_KEYWORDS',
+    'get_genre_template',
+    'detect_genre_from_text',
+    'get_arc_template',
+    'get_all_genres',
+    'get_cliffhanger_strategies',
+    # Cliffhanger prompts
+    'CLIFFHANGER_TYPES',
+    'CLIFFHANGER_STRATEGIES',
+    'get_cliffhanger_type',
+    'get_cliffhanger_prompt',
+    'get_audio_sting_prompt',
+    'get_cliffhanger_strategy',
+    'get_episode_cliffhanger_type',
+    'PREVIOUSLY_ON_STYLES',
+    'get_previously_on_prompt',
 ]

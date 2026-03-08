@@ -16,6 +16,24 @@ from .enums import JobStatus, PipelineMode, GenerationPhase
 # Quality Models
 # =============================================================================
 
+class QualityIssue(BaseModel):
+    """
+    A quality issue detected during evaluation.
+
+    Attributes:
+        dimension: Quality dimension where issue was detected
+        severity: Issue severity (error, warning, info)
+        message: Human-readable issue description
+        timestamp_ms: Optional timestamp in milliseconds
+        details: Additional issue details
+    """
+    dimension: str = Field(..., description="Quality dimension name")
+    severity: str = Field(..., description="Severity: error, warning, info")
+    message: str = Field(..., description="Issue description")
+    timestamp_ms: Optional[int] = Field(None, description="Timestamp in ms")
+    details: Optional[Dict[str, Any]] = Field(None, description="Additional details")
+
+
 class QualityScore(BaseModel):
     """
     Quality score for a single dimension.
@@ -28,7 +46,7 @@ class QualityScore(BaseModel):
         issues: List of issues detected for this dimension
     """
     dimension: str = Field(..., description="Quality dimension name")
-    score: Optional[int] = Field(None, ge=0, le=100, description="Score 0-100")
+    score: Optional[float] = Field(None, ge=0, le=100, description="Score 0-100")
     grade: Optional[str] = Field(None, description="Letter grade (A, B+, C, etc.)")
     status: Literal["pending", "evaluating", "complete", "error"] = Field(
         "pending", description="Evaluation status"
@@ -56,7 +74,7 @@ class QualityTrace(BaseModel):
         enhanced: True if reasoning was LLM-enhanced (Pro mode)
     """
     dimension: str = Field(..., description="Quality dimension name")
-    score: int = Field(0, ge=0, le=100, description="Score 0-100")
+    score: float = Field(0, ge=0, le=100, description="Score 0-100")
     grade: str = Field("F", description="Letter grade")
     reasoning: str = Field("", description="Human-readable explanation")
     strengths: List[str] = Field(default_factory=list, description="What's working well")
@@ -79,11 +97,11 @@ class QualityReport(BaseModel):
         issues: All detected issues across dimensions
         recommendations: Actionable recommendations for improvement
     """
-    overall_score: Optional[int] = Field(None, ge=0, le=100, description="Overall score")
+    overall_score: Optional[float] = Field(None, ge=0, le=100, description="Overall score")
     overall_grade: Optional[str] = Field(None, description="Overall letter grade")
     scores: List[QualityScore] = Field(default_factory=list, description="Per-dimension scores")
     traces: List[QualityTrace] = Field(default_factory=list, description="Explainable quality traces")
-    issues: List[str] = Field(default_factory=list, description="All detected issues")
+    issues: List[QualityIssue] = Field(default_factory=list, description="All detected issues")
     recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations")
 
 
@@ -348,3 +366,94 @@ class JobLogsResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     logs: List[LogEntry] = Field(default_factory=list)
+
+
+# =============================================================================
+# Series Response Models
+# =============================================================================
+
+class StyleDNAResponse(BaseModel):
+    """Style DNA summary for display."""
+    era: str
+    genre: str
+    geography: Optional[str] = None
+    tone: str
+    music_style: str = Field("", description="Music style description")
+    voice_style: str = Field("", description="Voice style description")
+
+
+class EpisodeSummaryResponse(BaseModel):
+    """Episode summary in series outline."""
+    episode_number: int
+    title: str
+    premise: str
+    cliffhanger_type: Optional[str] = None
+    status: str = "pending"
+
+
+class SeriesOutlineResponse(BaseModel):
+    """Series outline response for display/approval."""
+    title: str
+    description: str
+    episode_count: int
+    episode_length: str
+    series_type: str
+    overall_arc: str
+    themes: List[str]
+    episodes: List[EpisodeSummaryResponse]
+    style_dna: StyleDNAResponse
+
+
+class EpisodeResponse(BaseModel):
+    """Full episode details response."""
+    id: str
+    series_id: str
+    episode_number: int
+    title: str
+    status: str
+    job_id: Optional[str] = None
+    previously_on: Optional[str] = None
+    cliffhanger: Optional[str] = None
+    cliffhanger_type: Optional[str] = None
+    output_path: Optional[str] = None
+    audio_path: Optional[str] = None
+    video_url: Optional[str] = None
+    audio_url: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class SeriesResponse(BaseModel):
+    """
+    Full series information response.
+
+    Attributes:
+        id: Unique series identifier
+        status: Current series status
+        prompt: Original user prompt
+        outline: Series outline with episode summaries
+        episodes: Generated episodes
+        progress_percent: Overall completion percentage
+        created_at: Series creation timestamp
+    """
+    id: str
+    status: str
+    prompt: str
+    guidance: Optional[str] = None
+    mode: str
+    outline: SeriesOutlineResponse
+    episodes: List[EpisodeResponse] = Field(default_factory=list)
+    progress_percent: float = 0
+    assets_generated: bool = False
+    created_at: datetime
+    approved_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class SeriesListResponse(BaseModel):
+    """List of series response."""
+    series: List[SeriesResponse]
+    total: int
+    page: int = 1
+    page_size: int = 20

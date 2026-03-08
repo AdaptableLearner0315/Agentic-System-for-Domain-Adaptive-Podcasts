@@ -503,6 +503,7 @@ class PipelineService:
             ] if result.image_files else [],
             "duration_seconds": result.duration_seconds,
             "error": result.error,
+            "quality_report": result.quality_report,
         }
 
         if include_review_history:

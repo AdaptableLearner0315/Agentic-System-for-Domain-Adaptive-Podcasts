@@ -431,12 +431,15 @@ class JobManager:
                     script=result.get("script"),
                     tts_assets=[
                         AssetInfo(**a) for a in result.get("tts_files", [])
+                        if a.get("path")  # Filter out assets with None path
                     ],
                     bgm_assets=[
                         AssetInfo(**a) for a in result.get("bgm_files", [])
+                        if a.get("path")  # Filter out assets with None path
                     ],
                     image_assets=[
                         AssetInfo(**a) for a in result.get("image_files", [])
+                        if a.get("path")  # Filter out assets with None path
                     ],
                     review_history=result.get("review_history"),
                     config_used=result.get("config_used"),

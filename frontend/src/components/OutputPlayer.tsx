@@ -32,6 +32,9 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
   const [activeTab, setActiveTab] = useState<'video' | 'details'>('video')
   const [isMuted, setIsMuted] = useState(true)
   const [isChatOpen, setIsChatOpen] = useState(false)
+  const [showEvaluation, setShowEvaluation] = useState(false)
+  const [showAudioPreview, setShowAudioPreview] = useState(false)
+  const [showScriptPreview, setShowScriptPreview] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // Use quality prop if provided, otherwise fallback to result.quality_report
@@ -78,6 +81,10 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
     ? `${API_URL}${result.video_url}`
     : null
 
+  const audioUrl = result.audio_url
+    ? `${API_URL}${result.audio_url}`
+    : `${API_URL}/api/outputs/stream/${result.job_id}?file_type=audio`
+
   return (
     <div className="w-full">
       {/* Main layout: Video card on left, Quality panel on right */}
@@ -112,29 +119,75 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
               </div>
             </div>
 
-            {/* Chat toggle button */}
-            {showChat && (
-              <button
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
-                onClick={toggleChat}
-                aria-label="Open chat"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+            {/* Action buttons */}
+            <div className="flex items-center gap-2">
+              {/* Evaluation Score button */}
+              {qualityData ? (
+                <button
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-colors"
+                  onClick={() => setShowEvaluation(true)}
+                  aria-label="View evaluation score"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                  />
-                </svg>
-                <span className="text-sm font-medium">Chat</span>
-              </button>
-            )}
+                  <svg
+                    className="w-5 h-5"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                  <span className="text-sm font-medium">Score</span>
+                  {qualityData.overall_grade && (
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                      qualityData.overall_grade.startsWith('A') ? 'bg-emerald-500/20 text-emerald-400' :
+                      qualityData.overall_grade.startsWith('B') ? 'bg-green-500/20 text-green-400' :
+                      qualityData.overall_grade.startsWith('C') ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-orange-500/20 text-orange-400'
+                    }`}>
+                      {qualityData.overall_grade}
+                    </span>
+                  )}
+                </button>
+              ) : (
+                <button
+                  disabled
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50 text-muted-foreground opacity-50 cursor-not-allowed"
+                  aria-label="Evaluation score unavailable"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                  <span className="text-sm font-medium">Score</span>
+                </button>
+              )}
+
+              {/* Chat toggle button */}
+              {showChat && (
+                <button
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
+                  onClick={toggleChat}
+                  aria-label="Open chat"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                    />
+                  </svg>
+                  <span className="text-sm font-medium">Chat</span>
+                </button>
+              )}
+            </div>
           </div>
 
       {/* Tabs */}
@@ -211,7 +264,7 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
             </button>
             <button
               className="btn-outline"
-              onClick={() => handleDownload('audio')}
+              onClick={() => setShowAudioPreview(true)}
             >
               <svg
                 className="w-4 h-4 mr-2"
@@ -230,7 +283,7 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
             </button>
             <button
               className="btn-outline"
-              onClick={() => handleDownload('script')}
+              onClick={() => setShowScriptPreview(true)}
             >
               <svg
                 className="w-4 h-4 mr-2"
@@ -373,6 +426,169 @@ export function OutputPlayer({ result, onReset, showChat = true, quality }: Outp
             enableVoice={true}
           />
         </ChatDrawer>
+      )}
+
+      {/* Evaluation Score Modal */}
+      {showEvaluation && qualityData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          onClick={() => setShowEvaluation(false)}
+        >
+          <div
+            className="relative max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => setShowEvaluation(false)}
+              className="absolute -top-2 -right-2 z-10 p-2 bg-card border border-border rounded-full shadow-lg hover:bg-secondary transition-colors"
+              aria-label="Close evaluation"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            {/* Quality Panel */}
+            <QualityPanel quality={qualityData} isComplete={true} />
+          </div>
+        </div>
+      )}
+
+      {/* Audio Preview Modal */}
+      {showAudioPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          onClick={() => setShowAudioPreview(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Audio Preview</h3>
+              <button
+                onClick={() => setShowAudioPreview(false)}
+                className="p-1 hover:bg-secondary rounded-lg transition-colors"
+                aria-label="Close audio preview"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <audio
+              controls
+              autoPlay
+              className="w-full mb-4"
+              src={audioUrl}
+            >
+              Your browser does not support audio playback.
+            </audio>
+            <button
+              className="btn-outline w-full"
+              onClick={() => handleDownload('audio')}
+            >
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+              Download Audio
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Script Preview Modal */}
+      {showScriptPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          onClick={() => setShowScriptPreview(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Script</h3>
+              <button
+                onClick={() => setShowScriptPreview(false)}
+                className="p-1 hover:bg-secondary rounded-lg transition-colors"
+                aria-label="Close script preview"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto mb-4 p-4 rounded-lg bg-secondary/50">
+              {result.script ? (
+                <div className="space-y-4">
+                  <h4 className="text-xl font-bold">{result.script.title || 'Untitled'}</h4>
+                  {result.script.hook && (
+                    <div>
+                      <p className="text-sm text-muted-foreground font-medium mb-1">Hook</p>
+                      <p className="text-foreground">
+                        {typeof result.script.hook === 'string'
+                          ? result.script.hook
+                          : result.script.hook.text}
+                      </p>
+                    </div>
+                  )}
+                  {result.script.modules && result.script.modules.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground font-medium">Modules</p>
+                      {result.script.modules.map((module, i) => (
+                        <div key={i} className="p-3 rounded bg-background/50">
+                          <p className="font-medium text-sm text-primary mb-1">
+                            {module.title || `Module ${i + 1}`}
+                          </p>
+                          {module.chunks && module.chunks.length > 0 && (
+                            <div className="text-sm text-foreground">
+                              {module.chunks.map((chunk, j) => (
+                                <p key={j} className="mb-1">{chunk.text}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">No script available</p>
+              )}
+            </div>
+            <button
+              className="btn-outline w-full"
+              onClick={() => handleDownload('script')}
+            >
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+              Download Script
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
