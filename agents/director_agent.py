@@ -13,6 +13,7 @@ Features:
 
 from typing import Dict, Any, Optional, List
 from agents.base_agent import BaseAgent
+from config.llm import MODEL_OPTIONS
 
 
 REVIEW_PROMPT = """You are a demanding podcast director reviewing an enhanced script. Your job is to evaluate the script against strict quality criteria and either APPROVE it or provide specific FEEDBACK for improvement.
@@ -84,13 +85,15 @@ class DirectorAgent(BaseAgent):
     - Orchestration capabilities for review loops
     """
 
-    def __init__(self, model: str = "claude-opus-4-5-20250514"):
+    def __init__(self, model: str = None):
         """
         Initialize the Director Agent.
 
         Args:
-            model: LLM model to use (default: claude-opus-4-5-20250514)
+            model: LLM model to use (default: opus from config)
         """
+        if model is None:
+            model = MODEL_OPTIONS["opus"]
         super().__init__(
             name="Director",
             output_category="",  # Root Output directory

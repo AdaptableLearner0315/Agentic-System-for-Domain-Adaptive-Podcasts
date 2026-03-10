@@ -5,11 +5,33 @@ Author: Sarath
 Main entry point for the hyper-personalized podcast system.
 Provides subcommands for each stage of the pipeline.
 
+Supports two modes:
+- Normal: Fast generation (~2 minutes) with parallel execution
+- Pro: High-quality generation (~6 minutes) with full features
+
+Supports three input modes:
+- Generation: --prompt only → generate content from scratch
+- Enhancement: --input/--files only → enhance existing content
+- Hybrid: --prompt + --files → generate content informed by files
+
 Usage:
+    # MODE 1: Pure Generation (prompt only)
+    python run_pipeline.py full --prompt "The history of electronic music" --mode normal
+    python run_pipeline.py full --prompt "AI breakthroughs" --guidance "For beginners" --mode pro
+
+    # MODE 2: Pure Enhancement (files only - existing behavior)
+    python run_pipeline.py full --input transcript.txt --mode normal
+    python run_pipeline.py full --files document.pdf audio.mp3 --mode pro
+    python run_pipeline.py full --input "https://example.com/article" --mode normal
+
+    # MODE 3: Hybrid (prompt + files as context)
+    python run_pipeline.py full --prompt "Key insights" --files research.pdf --mode pro
+    python run_pipeline.py full --prompt "Future of AI" --files paper1.pdf paper2.pdf --mode normal
+
+    # Legacy commands (still supported)
     python run_pipeline.py enhance --input transcript.txt
     python run_pipeline.py audio --script Output/enhanced_script.json
     python run_pipeline.py visual --script Output/enhanced_script.json
-    python run_pipeline.py full --input transcript.txt
     python run_pipeline.py preview --module 1
 """
 
@@ -27,6 +49,51 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 
 
+def _is_topic_prompt(prompt: str) -> bool:
+    """
+    Determine if a prompt looks like a topic/subject for generation
+    vs. style guidance for enhancement.
+
+    Args:
+        prompt: The prompt string to analyze
+
+    Returns:
+        True if prompt looks like a topic, False if it looks like guidance
+    """
+    if not prompt:
+        return False
+
+    prompt_lower = prompt.lower().strip()
+
+    # Guidance patterns - these suggest the prompt is style/focus guidance
+    guidance_patterns = [
+        "make it",
+        "focus on",
+        "emphasize",
+        "for beginners",
+        "for experts",
+        "in the style of",
+        "more engaging",
+        "more technical",
+        "simplified",
+        "detailed",
+        "conversational",
+        "formal",
+        "informal",
+        "keep it",
+        "ensure",
+        "highlight",
+    ]
+
+    for pattern in guidance_patterns:
+        if pattern in prompt_lower:
+            return False
+
+    # If the prompt is short and doesn't have guidance patterns,
+    # it's likely a topic
+    return True
+
+
 def cmd_enhance(args):
     """
     Enhance a transcript with emotional arc and structure.
@@ -36,6 +103,7 @@ def cmd_enhance(args):
     """
     from agents.script_enhancer import ScriptEnhancer
     from agents.director import Director
+    from config.llm import MODEL_OPTIONS
 
     # Resolve input path
     input_path = Path(args.input)
@@ -63,12 +131,8 @@ def cmd_enhance(args):
         transcript = f.read()
     print(f"Transcript length: {len(transcript)} characters")
 
-    # Determine model
-    model_map = {
-        "sonnet": "claude-sonnet-4-20250514",
-        "opus": "claude-opus-4-20250514"
-    }
-    model_id = model_map.get(args.model, model_map["sonnet"])
+    # Determine model using centralized config
+    model_id = MODEL_OPTIONS.get(args.model, MODEL_OPTIONS["sonnet"])
 
     print(f"\n{'='*60}")
     print(f"Script Enhancement Pipeline")
@@ -286,13 +350,25 @@ def cmd_full(args):
     """
     Run the complete pipeline from transcript to final video.
 
-    Executes: enhance -> audio -> visual -> video assembly
+    Supports two modes:
+    - normal: Fast generation (~2 minutes)
+    - pro: High-quality generation (~6 minutes)
+
+    Also supports multi-format input (PDF, Word, audio, video, URL).
     """
+    import asyncio
+
+    mode = getattr(args, 'mode', 'normal')
+
     print(f"\n{'='*70}")
-    print("FULL PODCAST ENHANCEMENT PIPELINE")
+    print(f"FULL PODCAST ENHANCEMENT PIPELINE - {mode.upper()} MODE")
     print(f"{'='*70}")
 
-    # Step 1: Enhance script
+    # Check if using new mode-based pipeline
+    if mode in ('normal', 'pro'):
+        return cmd_full_mode(args)
+
+    # Legacy pipeline (original behavior)
     print("\n" + "="*60)
     print("STEP 1: SCRIPT ENHANCEMENT")
     print("="*60)
@@ -363,6 +439,230 @@ def cmd_full(args):
     print(f"  Audio:  Output/audio/final_v2/final_podcast_v2.mp3")
     print(f"  Video:  Output/Visuals Included/v2_daisy/final_podcast_video_v2.mp4")
 
+    return 0
+
+
+def cmd_full_mode(args):
+    """
+    Run the full pipeline using Normal or Pro mode.
+
+    This uses the new optimized pipelines with:
+    - Parallel execution
+    - Multi-format input support
+    - Progress streaming
+    - Emotion mapping (Pro mode)
+    - Multi-speaker support (Pro mode)
+
+    Supports three input modes:
+    - Generation: --prompt only → generate content from scratch
+    - Enhancement: --input/--files only → enhance existing content
+    - Hybrid: --prompt + --files → generate content informed by files
+    """
+    import asyncio
+    import time
+    from utils.smart_input_handler import SmartInputHandler, SmartInput
+
+    mode = getattr(args, 'mode', 'normal')
+    show_progress = not getattr(args, 'quiet', False)
+    config_path = getattr(args, 'config', None)
+
+    # Handle input arguments with backward compatibility
+    prompt = getattr(args, 'prompt', None)
+    guidance = getattr(args, 'guidance', None)
+    files = getattr(args, 'files', None) or []
+    input_path = getattr(args, 'input', None)
+
+    # Backward compatibility: --input becomes first file if no --files specified
+    if input_path and not files:
+        files = [input_path]
+
+    # Also support using --prompt as guidance when files are provided (legacy behavior)
+    # But only if --guidance is not explicitly set
+    legacy_prompt_as_guidance = prompt if (files and not guidance and not _is_topic_prompt(prompt)) else None
+    if legacy_prompt_as_guidance:
+        guidance = legacy_prompt_as_guidance
+        prompt = None  # Clear prompt since it's being used as guidance
+
+    # Validate inputs
+    if not prompt and not files:
+        print("Error: Must provide either --prompt or --input/--files")
+        print("\nUsage examples:")
+        print("  # Generate from topic (prompt only)")
+        print("  python run_pipeline.py full --prompt 'History of AI' --mode normal")
+        print("")
+        print("  # Enhance existing content (files only)")
+        print("  python run_pipeline.py full --input transcript.txt --mode normal")
+        print("  python run_pipeline.py full --files doc.pdf audio.mp3 --mode pro")
+        print("")
+        print("  # Generate with file context (prompt + files)")
+        print("  python run_pipeline.py full --prompt 'AI breakthroughs' --files research.pdf --mode pro")
+        return 1
+
+    # Create SmartInput
+    smart_input = SmartInput(
+        prompt=prompt,
+        files=files,
+        guidance=guidance,
+    )
+
+    # Determine input mode for display
+    handler = SmartInputHandler()
+    input_mode = handler.detect_mode(smart_input)
+
+    start_time = time.time()
+
+    print(f"\n{'='*70}")
+    print(f"NELL PODCAST GENERATION - {mode.upper()} MODE")
+    print(f"{'='*70}")
+    print(f"Input mode: {input_mode.upper()}")
+    if prompt:
+        print(f"Topic/Prompt: {prompt[:60]}{'...' if len(prompt) > 60 else ''}")
+    if files:
+        print(f"Files: {', '.join(files)}")
+    if guidance:
+        print(f"Guidance: {guidance[:60]}{'...' if len(guidance) > 60 else ''}")
+    if mode == "normal":
+        print(f"Target time: ~2 minutes")
+    else:
+        print(f"Target time: ~6 minutes")
+        # Show Pro mode specific settings
+        speaker_format = getattr(args, 'speaker_format', 'auto')
+        print(f"Speaker format: {speaker_format}")
+        if not getattr(args, 'no_emotion_voice', False):
+            print(f"Emotion voice sync: enabled")
+        if not getattr(args, 'no_emotion_images', False):
+            print(f"Emotion image alignment: enabled")
+    print(f"{'='*70}\n")
+
+    # Determine length based on mode
+    length = "short" if mode == "normal" else "standard"
+
+    try:
+        # Process input using SmartInputHandler
+        print("Processing input...")
+        content = handler.process(smart_input, length=length)
+        print(f"Content ready: {len(content.text)} characters from {content.source_type}")
+
+        if mode == "normal":
+            from pipelines.normal_pipeline import NormalPipeline, run_normal_pipeline
+            from utils.progress_stream import ProgressStream, print_progress
+            import uuid
+
+            # Generate unique job_id for CLI runs to avoid overwriting outputs
+            job_id = str(uuid.uuid4())[:8]
+            pipeline = NormalPipeline(job_id=job_id)
+            progress = ProgressStream(callback=print_progress) if show_progress else None
+
+            # Pass the already-processed content text directly
+            # The pipeline's input_router will handle it as text
+            result = asyncio.run(pipeline.run_with_content(content, progress))
+
+        else:  # pro mode
+            from pipelines.pro_pipeline import ProPipeline, ProConfig, run_pro_pipeline
+            from utils.progress_stream import ProgressStream, print_progress
+
+            # Load config if provided
+            pro_config = None
+            if config_path:
+                from config.user_config import UserConfig
+                user_config = UserConfig.load(config_path)
+                pro_config = user_config.to_pro_config()
+            else:
+                pro_config = ProConfig()
+
+            # Apply CLI overrides
+            speaker_format = getattr(args, 'speaker_format', 'auto')
+            pro_config.speaker_format = speaker_format
+
+            # Parse manual speaker assignments
+            speakers_arg = getattr(args, 'speakers', None)
+            if speakers_arg:
+                voice_overrides = {}
+                for pair in speakers_arg.split(','):
+                    if ':' in pair:
+                        role, voice = pair.split(':', 1)
+                        voice_overrides[role.strip()] = voice.strip()
+                pro_config.voice_overrides = voice_overrides
+                print(f"Voice overrides: {voice_overrides}")
+
+            # Apply emotion settings from CLI
+            if getattr(args, 'no_emotion_voice', False):
+                pro_config.emotion_voice_sync = False
+            if getattr(args, 'no_emotion_images', False):
+                pro_config.emotion_image_alignment = False
+            if getattr(args, 'no_emotion_validation', False):
+                pro_config.emotion_validation = False
+
+            pipeline = ProPipeline(config=pro_config)
+            progress = ProgressStream(callback=print_progress) if show_progress else None
+
+            # Pass the already-processed content
+            result = asyncio.run(pipeline.run_with_content(content, progress))
+
+        elapsed = time.time() - start_time
+
+        print(f"\n{'='*70}")
+        if result.success:
+            print("GENERATION COMPLETE!")
+            print(f"{'='*70}")
+            print(f"Output: {result.output_path}")
+            print(f"Time: {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
+
+            if hasattr(result, 'script') and result.script:
+                print(f"Title: {result.script.get('title', 'Unknown')}")
+
+            if mode == "normal":
+                target = 120
+                if elapsed <= target:
+                    print(f"Status: WITHIN TARGET (target: {target}s)")
+                else:
+                    print(f"Status: Over target by {elapsed - target:.1f}s")
+        else:
+            print("GENERATION FAILED")
+            print(f"{'='*70}")
+            print(f"Error: {result.error}")
+            return 1
+
+        return 0
+
+    except Exception as e:
+        print(f"\n{'='*70}")
+        print("GENERATION FAILED")
+        print(f"{'='*70}")
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_config(args):
+    """
+    Configure user preferences for podcast generation.
+    """
+    from config.user_config import run_config_wizard, get_default_config, save_default_config
+
+    if args.show:
+        # Show current config
+        config = get_default_config()
+        print("\n" + "="*50)
+        print("Current Configuration")
+        print("="*50)
+        print(f"  Default mode: {config.default_mode}")
+        print(f"  Voice preset: {config.voice_preset}")
+        print(f"  Music genre: {config.music_genre}")
+        print(f"  Image style: {config.image_style}")
+        print(f"  Director review: {config.director_review}")
+        print(f"  Max review rounds: {config.max_review_rounds}")
+        return 0
+
+    if args.reset:
+        # Reset to defaults
+        from config.user_config import UserConfig
+        config = UserConfig()
+        save_default_config(config)
+        print("Configuration reset to defaults.")
+        return 0
+
+    # Run interactive wizard
+    run_config_wizard()
     return 0
 
 
@@ -455,14 +755,30 @@ def cmd_bgm(args):
 def main():
     """Main entry point with subcommand routing."""
     parser = argparse.ArgumentParser(
-        description="Agentic System for Hyper-Personalized Podcasts",
+        description="Nell - Agentic System for Hyper-Personalized Podcasts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # MODE 1: Pure Generation (prompt only)
+  python run_pipeline.py full --prompt "History of electronic music" --mode normal
+  python run_pipeline.py full --prompt "AI breakthroughs" --guidance "For beginners" --mode pro
+
+  # MODE 2: Pure Enhancement (files only - existing behavior)
+  python run_pipeline.py full --input transcript.txt --mode normal
+  python run_pipeline.py full --files document.pdf audio.mp3 --mode pro
+  python run_pipeline.py full --input "https://example.com/article" --mode normal
+
+  # MODE 3: Hybrid (prompt + files as context)
+  python run_pipeline.py full --prompt "Key insights" --files research.pdf --mode pro
+  python run_pipeline.py full --prompt "Future of AI" --files paper1.pdf paper2.pdf --mode normal
+
+  # Configure preferences
+  python run_pipeline.py config
+
+  # Legacy commands (still supported)
   python run_pipeline.py enhance --input transcript.txt
   python run_pipeline.py audio --script Output/enhanced_script.json
   python run_pipeline.py visual --script Output/enhanced_script.json
-  python run_pipeline.py full --input transcript.txt
   python run_pipeline.py preview --module 1
   python run_pipeline.py bgm --all
 
@@ -552,20 +868,74 @@ For detailed help on a subcommand:
     )
     full_parser.add_argument(
         "--input", "-i",
-        required=True,
-        help="Input transcript file"
+        help="Input file (txt, pdf, docx, mp3, mp4, or URL) - for backward compatibility"
+    )
+    full_parser.add_argument(
+        "--prompt", "-p",
+        help="Topic/prompt for content generation (triggers generation mode)"
+    )
+    full_parser.add_argument(
+        "--files", "-f",
+        nargs="+",
+        help="Input files (PDF, audio, video, text, URL) - can specify multiple"
+    )
+    full_parser.add_argument(
+        "--guidance", "-g",
+        help="Style/focus guidance for generation or enhancement"
+    )
+    full_parser.add_argument(
+        "--mode",
+        choices=["normal", "pro", "legacy"],
+        default="normal",
+        help="Generation mode: normal (~2 min), pro (~6 min), legacy (original)"
+    )
+    full_parser.add_argument(
+        "--config", "-c",
+        help="Path to user config file (for Pro mode customization)"
+    )
+    full_parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Disable progress output"
     )
     full_parser.add_argument(
         "--model", "-m",
         choices=["sonnet", "opus"],
         default="sonnet",
-        help="Claude model to use (default: sonnet)"
+        help="Claude model to use (default: sonnet, only for legacy mode)"
     )
     full_parser.add_argument(
         "--max-reviews",
         type=int,
         default=3,
-        help="Maximum review iterations (default: 3)"
+        help="Maximum review iterations (default: 3, only for legacy mode)"
+    )
+    # NEW: Speaker format options (Pro mode only)
+    full_parser.add_argument(
+        "--speaker-format",
+        choices=["auto", "single", "interview", "co_hosts", "narrator_characters"],
+        default="auto",
+        help="Speaker format (Pro mode): auto-detect, single narrator, interview, co-hosts, or narrator+characters"
+    )
+    full_parser.add_argument(
+        "--speakers",
+        help="Manual speaker-voice assignments (Pro mode): e.g., 'host:female_friendly,guest:male_professional'"
+    )
+    # NEW: Emotion options (Pro mode only)
+    full_parser.add_argument(
+        "--no-emotion-voice",
+        action="store_true",
+        help="Disable emotion-responsive voice parameters (Pro mode)"
+    )
+    full_parser.add_argument(
+        "--no-emotion-images",
+        action="store_true",
+        help="Disable emotion-aligned image generation (Pro mode)"
+    )
+    full_parser.add_argument(
+        "--no-emotion-validation",
+        action="store_true",
+        help="Disable emotion validation (Pro mode)"
     )
 
     # =========================================================================
@@ -626,6 +996,24 @@ For detailed help on a subcommand:
     )
 
     # =========================================================================
+    # config command
+    # =========================================================================
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Configure user preferences for podcast generation"
+    )
+    config_parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Show current configuration"
+    )
+    config_parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Reset to default configuration"
+    )
+
+    # =========================================================================
     # Parse and route
     # =========================================================================
     args = parser.parse_args()
@@ -642,6 +1030,7 @@ For detailed help on a subcommand:
         "full": cmd_full,
         "preview": cmd_preview,
         "bgm": cmd_bgm,
+        "config": cmd_config,
     }
 
     handler = commands.get(args.command)

@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar styling — warm tones */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(20 12% 10%);
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(20 10% 25%);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(20 10% 35%);
+}
+
+/* Base styles */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Focus visible styles */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+/* Component utilities */
+@layer utilities {
+  /* Glass effect */
+  .glass {
+    @apply bg-card/80 backdrop-blur-lg border border-white/10;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent;
+  }
+
+  /* Glow effect — warm orange */
+  .glow {
+    box-shadow: 0 0 20px rgba(234, 120, 40, 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(220, 80, 50, 0.3);
+  }
+
+  /* Ambient background — warm radial glow */
+  .bg-ambient {
+    background: radial-gradient(ellipse 80% 50% at 50% -10%, hsla(24, 80%, 40%, 0.15), transparent 70%),
+                hsl(20 15% 6%);
+  }
+
+  /* Animation utilities */
+  .animate-in {
+    animation: slide-up 0.3s ease-out forwards;
+  }
+
+  /* Progress bar animation */
+  .progress-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent
+    );
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Button base styles */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+
+  .btn-secondary {
+    @apply btn bg-secondary text-secondary-foreground hover:bg-secondary/80;
+  }
+
+  .btn-outline {
+    @apply btn border border-border bg-transparent hover:bg-secondary;
+  }
+
+  .btn-ghost {
+    @apply btn hover:bg-secondary;
+  }
+
+  /* Gradient "Create" button — Suno-style */
+  .btn-create {
+    @apply w-full inline-flex items-center justify-center rounded-xl px-6 py-4 text-lg font-semibold;
+    @apply text-white transition-all duration-200;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    background: linear-gradient(135deg, hsl(12 80% 55%), hsl(24 90% 55%));
+    box-shadow: 0 4px 20px rgba(234, 120, 40, 0.3);
+  }
+
+  .btn-create:hover:not(:disabled) {
+    box-shadow: 0 6px 28px rgba(234, 120, 40, 0.45);
+    transform: translateY(-1px);
+  }
+
+  .btn-create:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  /* Card styles */
+  .card {
+    @apply rounded-xl border border-border bg-card p-6;
+  }
+
+  /* Input styles */
+  .input {
+    @apply flex h-10 w-full rounded-lg border border-input bg-input px-3 py-2;
+    @apply text-sm placeholder:text-muted-foreground;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .textarea {
+    @apply flex min-h-[120px] w-full rounded-lg border border-input bg-input px-3 py-2;
+    @apply text-sm placeholder:text-muted-foreground resize-none;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  /* Badge styles */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-primary {
+    @apply badge bg-primary/20 text-primary;
+  }
+
+  .badge-success {
+    @apply badge bg-success/20 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/20 text-warning;
+  }
+
+  .badge-destructive {
+    @apply badge bg-destructive/20 text-destructive;
+  }
+
+  /* Spinner */
+  .spinner {
+    @apply h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent;
+  }
+
+  /* Tab styles */
+  .tab {
+    @apply inline-flex items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5;
+    @apply text-sm font-medium ring-offset-background transition-all;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .tab-active {
+    @apply tab bg-secondary text-foreground shadow-sm;
+  }
+
+  .tab-inactive {
+    @apply tab text-muted-foreground hover:text-foreground;
+  }
+}
+
+/* Phase-specific colors — warm tones */
+.phase-initializing { @apply text-muted-foreground; }
+.phase-analyzing { @apply text-amber-400; }
+.phase-scripting { @apply text-orange-400; }
+.phase-generating_tts { @apply text-emerald-400; }
+.phase-generating_bgm { @apply text-rose-400; }
+.phase-generating_images { @apply text-teal-400; }
+.phase-generating_assets { @apply text-violet-400; }
+.phase-mixing_audio { @apply text-yellow-400; }
+.phase-assembling_video { @apply text-orange-300; }
+.phase-complete { @apply text-success; }
+.phase-error { @apply text-destructive; }

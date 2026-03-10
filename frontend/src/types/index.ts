@@ -1,0 +1,715 @@
+/**
+ * TypeScript type definitions for the Nell Podcast Frontend.
+ *
+ * These types mirror the backend API models for type safety.
+ */
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+/**
+ * Status of a generation job.
+ */
+export type JobStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+/**
+ * Pipeline execution mode.
+ */
+export type PipelineMode = 'normal' | 'pro' | 'ultra'
+
+/**
+ * Duration option value for the duration selector.
+ * 'auto' means duration is extracted from prompt or uses default.
+ */
+export type DurationOption = 'auto' | 3 | 5 | 10 | 15 | 20
+
+/**
+ * Current phase of the generation process.
+ *
+ * Normal mode: initializing -> analyzing -> scripting -> generating_assets ->
+ *     mixing_audio -> assembling_video -> complete
+ *
+ * Pro mode: initializing -> analyzing -> scripting -> director_review ->
+ *     validating -> generating_tts -> generating_bgm -> generating_images ->
+ *     mixing_audio -> assembling_video -> complete
+ */
+export type GenerationPhase =
+  | 'initializing'
+  | 'analyzing'
+  | 'scripting'
+  | 'director_review'  // Pro-only: Director review loop (45-90s)
+  | 'validating'       // Pro-only: Emotion validation + speaker assignment
+  | 'generating_tts'
+  | 'generating_bgm'
+  | 'generating_images'
+  | 'generating_assets'
+  | 'mixing_audio'
+  | 'assembling_video'
+  | 'complete'
+  | 'error'
+
+// =============================================================================
+// Request Types
+// =============================================================================
+
+/**
+ * Request to start a podcast generation job.
+ */
+export interface GenerationRequest {
+  /** Topic or prompt for content generation */
+  prompt?: string
+  /** List of uploaded file IDs to use as input */
+  file_ids?: string[]
+  /** Additional instructions for generation style */
+  guidance?: string
+  /** Pipeline mode: 'normal' (fast) or 'pro' (quality) */
+  mode: PipelineMode
+  /** Target podcast duration in minutes (1-30). Auto-detected from prompt if not specified. */
+  target_duration_minutes?: number
+  /** Enable conversational style with cliffhangers, suspense, and dramatic reveals (co-hosts format) */
+  conversational_style?: boolean
+  /** Pro mode configuration overrides */
+  config?: ProConfig
+}
+
+/**
+ * Pro mode configuration options.
+ */
+export interface ProConfig {
+  director_review?: boolean
+  max_review_rounds?: number
+  approval_threshold?: number
+  voice_preset?: string
+  apply_voice_styles?: boolean
+  custom_pronunciations?: Record<string, string>
+  music_genre?: string
+  bgm_segments?: number
+  daisy_chain?: boolean
+  image_count?: number
+  image_style?: string
+  speaker_format?: string
+  manual_speakers?: Record<string, string>
+  emotion_voice_sync?: boolean
+  emotion_image_alignment?: boolean
+  emotion_validation?: boolean
+}
+
+/**
+ * Request to extract content from a URL.
+ */
+export interface URLExtractionRequest {
+  url: string
+  description?: string
+}
+
+// =============================================================================
+// Quality Types
+// =============================================================================
+
+/**
+ * Status of quality evaluation for a dimension.
+ */
+export type QualityStatus = 'pending' | 'evaluating' | 'complete' | 'error'
+
+/**
+ * A quality issue detected during evaluation.
+ */
+export interface QualityIssue {
+  /** Quality dimension where issue was detected */
+  dimension: string
+  /** Issue severity: error, warning, info */
+  severity: string
+  /** Human-readable issue description */
+  message: string
+  /** Optional timestamp in milliseconds */
+  timestamp_ms?: number
+  /** Additional issue details */
+  details?: Record<string, unknown>
+}
+
+/**
+ * Quality score for a single dimension.
+ */
+export interface QualityScore {
+  /** Name of the quality dimension (script, pacing, voice, etc.) */
+  dimension: string
+  /** Numeric score 0-100, null if not yet evaluated */
+  score: number | null
+  /** Letter grade (A, B+, C, etc.), null if not yet evaluated */
+  grade: string | null
+  /** Evaluation status */
+  status: QualityStatus
+  /** Issues detected for this dimension */
+  issues: string[]
+}
+
+/**
+ * Explainable quality trace for a single dimension.
+ * Provides human-readable reasoning and diagnostic data.
+ */
+export interface QualityTrace {
+  /** Quality dimension name */
+  dimension: string
+  /** Numeric score 0-100 */
+  score: number
+  /** Letter grade */
+  grade: string
+  /** 1-2 sentence human-readable explanation */
+  reasoning: string
+  /** What's working well (green indicators) */
+  strengths: string[]
+  /** What's holding the score back (orange indicators) */
+  weaknesses: string[]
+  /** Pro mode only - actionable fixes */
+  suggestions: string[]
+  /** Evaluation order (1=first, 8=last) */
+  sequence: number
+  /** Debug data - measurements that fed into score */
+  raw_metrics: Record<string, unknown>
+  /** True if reasoning was LLM-enhanced (Pro mode) */
+  enhanced: boolean
+}
+
+/**
+ * Comprehensive quality report for a generation job.
+ */
+export interface QualityReport {
+  /** Weighted overall score 0-100 */
+  overall_score: number | null
+  /** Letter grade for overall quality */
+  overall_grade: string | null
+  /** Per-dimension quality scores */
+  scores: QualityScore[]
+  /** Explainable quality traces with reasoning */
+  traces: QualityTrace[]
+  /** All detected issues across dimensions */
+  issues: QualityIssue[]
+  /** Actionable recommendations for improvement */
+  recommendations: string[]
+}
+
+// =============================================================================
+// Response Types
+// =============================================================================
+
+/**
+ * Real-time progress update for a generation job.
+ */
+export interface ProgressResponse {
+  job_id: string
+  phase: GenerationPhase
+  message: string
+  progress_percent: number
+  current_step: number
+  total_steps: number
+  eta_seconds?: number
+  preview?: string
+  elapsed_seconds: number
+  details?: Record<string, unknown>
+  /** Real-time quality metrics (populated as evaluation progresses) */
+  quality?: QualityReport
+}
+
+/**
+ * Information about a generated asset.
+ */
+export interface AssetInfo {
+  id: string
+  filename: string
+  path: string
+  type: string
+  duration_seconds?: number
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Final result of a completed generation job.
+ */
+export interface ResultResponse {
+  job_id: string
+  success: boolean
+  output_path?: string
+  video_url?: string
+  audio_url?: string
+  duration_seconds?: number
+  script?: ScriptData
+  tts_assets?: AssetInfo[]
+  bgm_assets?: AssetInfo[]
+  image_assets?: AssetInfo[]
+  review_history?: ReviewEntry[]
+  config_used?: ProConfig
+  /** Final quality evaluation report */
+  quality_report?: QualityReport
+  error?: string
+}
+
+/**
+ * Information about a generation job.
+ */
+export interface JobResponse {
+  id: string
+  status: JobStatus
+  mode: PipelineMode
+  created_at: string
+  started_at?: string
+  completed_at?: string
+  prompt?: string
+  file_ids?: string[]
+  guidance?: string
+  progress?: ProgressResponse
+  result?: ResultResponse
+  error?: string
+}
+
+/**
+ * List of generation jobs.
+ */
+export interface JobListResponse {
+  jobs: JobResponse[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/**
+ * Information about an uploaded file.
+ */
+export interface FileResponse {
+  id: string
+  filename: string
+  content_type?: string
+  size_bytes: number
+  uploaded_at: string
+  source_type: string
+  extracted_text?: string
+}
+
+/**
+ * List of uploaded files.
+ */
+export interface FileListResponse {
+  files: FileResponse[]
+  total: number
+}
+
+/**
+ * Health check response.
+ */
+export interface HealthResponse {
+  status: string
+  version: string
+  timestamp: string
+}
+
+/**
+ * Standard error response.
+ */
+export interface ErrorResponse {
+  error?: string
+  message?: string
+  detail?: string  // FastAPI HTTPException format
+  details?: Record<string, unknown>
+}
+
+// =============================================================================
+// Script Types
+// =============================================================================
+
+/**
+ * Enhanced script data structure.
+ */
+export interface ScriptData {
+  title?: string
+  hook?: HookData | string
+  modules?: ModuleData[]
+  review_history?: ReviewEntry[]
+  final_status?: FinalStatus
+}
+
+/**
+ * Hook section of the script.
+ */
+export interface HookData {
+  text: string
+  emotion?: string
+  duration_estimate_seconds?: number
+}
+
+/**
+ * Module section of the script.
+ */
+export interface ModuleData {
+  id: number
+  title: string
+  emotion_arc?: string
+  chunks: ChunkData[]
+}
+
+/**
+ * Individual chunk within a module.
+ */
+export interface ChunkData {
+  text: string
+  emotion?: string
+  tension_level?: number
+  keywords?: string[]
+  visual_cues?: string[]
+  audio_cues?: string[]
+}
+
+/**
+ * Director review entry.
+ */
+export interface ReviewEntry {
+  score?: number
+  feedback?: string
+  round?: number
+}
+
+/**
+ * Final status of script review.
+ */
+export interface FinalStatus {
+  approved: boolean
+  total_rounds: number
+  final_score: number
+}
+
+// =============================================================================
+// WebSocket Types
+// =============================================================================
+
+/**
+ * WebSocket message types.
+ */
+export type WebSocketMessageType =
+  | 'progress'
+  | 'complete'
+  | 'error'
+  | 'cancelled'
+  | 'cancelling'
+  | 'heartbeat'
+  | 'ping'
+  | 'pong'
+  | 'trailer_ready'
+
+/**
+ * WebSocket message structure.
+ */
+export interface WebSocketMessage {
+  type: WebSocketMessageType
+  job_id?: string
+  phase?: GenerationPhase
+  message?: string
+  progress_percent?: number
+  current_step?: number
+  total_steps?: number
+  eta_seconds?: number
+  preview?: string
+  elapsed_seconds?: number
+  success?: boolean
+  output_path?: string
+  video_url?: string
+  duration_seconds?: number
+  details?: Record<string, unknown>
+  error?: string
+  // Trailer-specific fields
+  trailer_url?: string
+  // Quality metrics
+  quality?: QualityReport
+}
+
+/**
+ * Trailer preview data.
+ */
+export interface TrailerData {
+  url: string
+  duration_seconds: number
+}
+
+/**
+ * Phase timing data included in progress details.
+ */
+export interface PhaseTimings {
+  phase_timings: Record<string, number>
+  current_phase_elapsed: number
+}
+
+/**
+ * Expected duration hint for a pipeline mode.
+ * Included in progress details at the start of generation.
+ */
+export interface DurationHint {
+  mode: 'normal' | 'pro' | 'ultra'
+  expected_minutes_min: number
+  expected_minutes_max: number
+  hint: string
+  phases: {
+    scripting: string
+    assets: string
+    assembly: string
+  }
+}
+
+/**
+ * Director review progress details (Pro mode only).
+ */
+export interface DirectorReviewDetails {
+  round: number
+  max_rounds: number
+  sub_step: 'enhancing' | 'reviewing' | 'approved'
+  phase_progress: number
+  estimated_phase_duration_seconds: number
+}
+
+/**
+ * Sub-progress for parallel asset generation.
+ */
+export interface ParallelStatus {
+  tts: { done: number; total: number; elapsed_s?: number }
+  bgm: { done: number; total: number; elapsed_s?: number }
+  images: { done: number; total: number; elapsed_s?: number }
+}
+
+/**
+ * Asset timing breakdown from the pipeline.
+ */
+export interface AssetTimings {
+  tts: number
+  bgm: number
+  images: number
+  mixing: number
+  video_assembly: number
+}
+
+// =============================================================================
+// Configuration Types
+// =============================================================================
+
+/**
+ * Mode configuration details.
+ */
+export interface ModeConfig {
+  name: string
+  description: string
+  features: string[]
+  estimated_duration: string
+}
+
+/**
+ * System configuration response.
+ */
+export interface ConfigResponse {
+  modes: Record<string, ModeConfig>
+  supported_formats: string[]
+  max_file_size_mb: number
+}
+
+/**
+ * Available voice preset.
+ */
+export interface VoicePreset {
+  id: string
+  description: string
+}
+
+/**
+ * Voice configuration response.
+ */
+export interface VoiceConfigResponse {
+  voices: Record<string, VoicePreset>
+  default: string
+}
+
+// =============================================================================
+// Job Logs Types
+// =============================================================================
+
+/**
+ * Individual log entry for job execution.
+ */
+export interface LogEntry {
+  timestamp: string
+  level: 'INFO' | 'ERROR' | 'WARNING'
+  message: string
+  phase?: string
+}
+
+/**
+ * Execution logs response for a job.
+ */
+export interface JobLogs {
+  job_id: string
+  status: string
+  mode: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+  error?: string
+  logs: LogEntry[]
+}
+
+// =============================================================================
+// Interactive Chat Types (re-exported)
+// =============================================================================
+
+export * from './interactive'
+
+// =============================================================================
+// Series Types
+// =============================================================================
+
+/**
+ * Type of podcast series.
+ */
+export type SeriesType = 'documentary' | 'narrative' | 'hybrid'
+
+/**
+ * Target episode duration.
+ */
+export type EpisodeLength = 'short' | 'medium'
+
+/**
+ * Status of a series.
+ */
+export type SeriesStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled'
+
+/**
+ * Status of an episode.
+ */
+export type EpisodeStatus = 'pending' | 'generating' | 'completed' | 'failed'
+
+/**
+ * Types of cliffhangers for episode endings.
+ */
+export type CliffhangerType = 'revelation' | 'twist' | 'question' | 'countdown' | 'promise'
+
+/**
+ * Request to create a new podcast series.
+ */
+export interface CreateSeriesRequest {
+  /** Topic or premise for the series */
+  prompt: string
+  /** Number of episodes (3-20) */
+  episode_count?: number
+  /** Episode length: 'short' (5-10min) or 'medium' (10-20min) */
+  episode_length?: EpisodeLength
+  /** Series type: 'documentary', 'narrative', or 'hybrid' */
+  series_type?: SeriesType
+  /** Additional instructions for series style/content */
+  guidance?: string
+  /** Pipeline mode for episode generation */
+  mode?: PipelineMode
+}
+
+/**
+ * Request to approve or modify a series outline.
+ */
+export interface ApproveOutlineRequest {
+  /** Whether to approve the outline */
+  approved: boolean
+  /** Optional modifications to apply */
+  modifications?: Record<string, unknown>
+}
+
+/**
+ * Request to generate a specific episode.
+ */
+export interface GenerateEpisodeRequest {
+  /** Episode number to generate (optional, defaults to next) */
+  episode_number?: number
+}
+
+/**
+ * Style DNA summary for display.
+ */
+export interface StyleDNA {
+  era: string
+  genre: string
+  geography?: string
+  tone: string
+  music_style: string
+  voice_style: string
+}
+
+/**
+ * Episode summary in series outline.
+ */
+export interface EpisodeSummary {
+  episode_number: number
+  title: string
+  premise: string
+  cliffhanger_type?: CliffhangerType
+  status: EpisodeStatus
+}
+
+/**
+ * Series outline response for display/approval.
+ */
+export interface SeriesOutline {
+  title: string
+  description: string
+  episode_count: number
+  episode_length: EpisodeLength
+  series_type: SeriesType
+  overall_arc: string
+  themes: string[]
+  episodes: EpisodeSummary[]
+  style_dna: StyleDNA
+}
+
+/**
+ * Full episode details response.
+ */
+export interface Episode {
+  id: string
+  series_id: string
+  episode_number: number
+  title: string
+  status: EpisodeStatus
+  job_id?: string
+  previously_on?: string
+  cliffhanger?: string
+  cliffhanger_type?: CliffhangerType
+  output_path?: string
+  audio_path?: string
+  video_url?: string
+  audio_url?: string
+  duration_seconds?: number
+  created_at: string
+  completed_at?: string
+}
+
+/**
+ * Full series information response.
+ */
+export interface Series {
+  id: string
+  status: SeriesStatus
+  prompt: string
+  guidance?: string
+  mode: PipelineMode
+  outline: SeriesOutline
+  episodes: Episode[]
+  progress_percent: number
+  assets_generated: boolean
+  created_at: string
+  approved_at?: string
+  completed_at?: string
+}
+
+/**
+ * List of series response.
+ */
+export interface SeriesListResponse {
+  series: Series[]
+  total: number
+  page: number
+  page_size: number
+}

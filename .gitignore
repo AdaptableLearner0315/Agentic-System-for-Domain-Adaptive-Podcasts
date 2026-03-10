@@ -48,3 +48,21 @@ Output/Visuals Included/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+
+# Generated output artifacts
+Output/enhanced_script.json
+backend/Output/
+backend/uploads/
+
+# Image files (generated assets)
+*.png
+*.jpg
+*.jpeg
+
+# Module planning docs (not source)
+Nell-module*/

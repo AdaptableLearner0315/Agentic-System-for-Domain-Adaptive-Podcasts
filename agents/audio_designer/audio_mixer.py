@@ -4,12 +4,74 @@ Author: Sarath
 
 Combines TTS voice audio with background music using pydub.
 Supports audio design metadata for dynamic vocal intensity, pacing, and transitions.
+
+Quality improvements:
+- Dynamic pause durations based on emotion (not hardcoded 350ms)
+- Adaptive BGM volume based on emotion
+- Guaranteed fadeout on endings
 """
 
 import json
 from pydub import AudioSegment
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+from config.emotion_voice_mapping import (
+    get_emotion_voice_params,
+    get_pause_durations,
+    PAUSE_STYLE_DURATIONS
+)
+
+
+# Emotion-based BGM volume mapping (adaptive instead of hardcoded -18dB)
+EMOTION_BGM_VOLUME = {
+    "reflection": -20,      # Quieter for contemplation
+    "melancholy": -20,      # Quieter for emotional moments
+    "wonder": -18,          # Balanced
+    "curiosity": -18,       # Balanced
+    "intrigue": -17,        # Slightly more present
+    "tension": -15,         # More present for drama
+    "excitement": -14,      # Energetic
+    "triumph": -12,         # Bold and present
+    "liberation": -14,      # Freeing
+    "mastery": -16,         # Authoritative
+    "intensity": -14,       # Powerful
+    "explosive_energy": -13,  # High energy
+    "rebellion": -14,       # Raw
+    "restlessness": -16,    # Edgy
+    "experimentation": -17,  # Creative
+    "neutral": -18,         # Default
+}
+
+
+def get_pause_for_emotion(emotion: str, pause_type: str = "between_sentences") -> int:
+    """
+    Get emotion-appropriate pause duration.
+
+    Args:
+        emotion: Emotion name (e.g., 'wonder', 'tension')
+        pause_type: 'between_sentences' or 'after_chunk'
+
+    Returns:
+        Pause duration in milliseconds
+    """
+    voice_params = get_emotion_voice_params(emotion)
+    pause_style = voice_params.get("pause_style", "normal")
+    durations = get_pause_durations(pause_style)
+    return durations.get(pause_type, 350)
+
+
+def get_bgm_volume_for_emotion(emotion: str) -> int:
+    """
+    Get emotion-appropriate BGM volume.
+
+    Args:
+        emotion: Emotion name
+
+    Returns:
+        BGM volume in dB
+    """
+    return EMOTION_BGM_VOLUME.get(emotion.lower(), -18)
 
 
 class AudioMixer:
@@ -213,22 +275,30 @@ class AudioMixer:
     def concatenate_sentences(
         self,
         sentence_audios: List[AudioSegment],
-        pause_between_ms: int = 350
+        pause_between_ms: int = 350,
+        emotion: Optional[str] = None
     ) -> AudioSegment:
         """
         Concatenate sentence audio segments with brief pauses between them.
 
         Pauses are ONLY at sentence boundaries, not within sentences.
+        If emotion is provided, uses emotion-appropriate pause durations
+        instead of the default 350ms.
 
         Args:
             sentence_audios: List of sentence AudioSegment objects
-            pause_between_ms: Pause between sentences (default: 350ms)
+            pause_between_ms: Pause between sentences (default: 350ms, ignored if emotion provided)
+            emotion: Optional emotion for dynamic pause duration
 
         Returns:
             Combined audio segment
         """
         if not sentence_audios:
             return AudioSegment.empty()
+
+        # Use emotion-based pause if provided
+        if emotion:
+            pause_between_ms = get_pause_for_emotion(emotion, "between_sentences")
 
         result = sentence_audios[0]
 
@@ -248,11 +318,11 @@ class AudioMixer:
 
         Applies:
         - Per-sentence intensity boost (from TTS metadata or chunk metadata)
-        - Brief pauses between sentences (350ms)
+        - Dynamic pauses between sentences based on emotion
 
         Args:
             sentence_files: List of sentence audio file metadata
-            chunk_metadata: Optional chunk metadata (fallback for intensity)
+            chunk_metadata: Optional chunk metadata (fallback for intensity and emotion)
 
         Returns:
             Combined chunk audio with intensity and pacing applied
@@ -260,7 +330,12 @@ class AudioMixer:
         if not sentence_files:
             return AudioSegment.empty()
 
-        pause_between = 350
+        # Get emotion from sentence files or chunk metadata for dynamic pacing
+        chunk_emotion = None
+        if sentence_files and sentence_files[0].get("emotion"):
+            chunk_emotion = sentence_files[0]["emotion"]
+        elif chunk_metadata:
+            chunk_emotion = chunk_metadata.get("emotion", "neutral")
 
         processed_sentences = []
         for sent_file in sentence_files:
@@ -279,7 +354,11 @@ class AudioMixer:
 
             processed_sentences.append(sent_audio)
 
-        return self.concatenate_sentences(processed_sentences, pause_between_ms=pause_between)
+        # Use emotion-based pause duration
+        return self.concatenate_sentences(
+            processed_sentences,
+            emotion=chunk_emotion
+        )
 
     def concatenate_with_dynamic_pauses(
         self,
@@ -412,9 +491,14 @@ class AudioMixer:
                 processed_chunks, chunk_metadata_list, default_pause_ms=800
             )
 
-            # Mix with BGM
-            bgm_volume = -18
-            if self.design_metadata:
+            # Mix with BGM - use emotion-based volume if available
+            bgm_volume = -18  # Default
+            module_emotion = module_meta.get("bgm_emotion") if module_meta else None
+
+            # Priority: emotion-based > metadata > default
+            if module_emotion:
+                bgm_volume = get_bgm_volume_for_emotion(module_emotion)
+            elif self.design_metadata:
                 bgm_volume = self.design_metadata.get("global_parameters", {}).get(
                     "bgm_base_volume_db", -18
                 )
@@ -422,7 +506,8 @@ class AudioMixer:
             if module_id in bgm_lookup:
                 bgm_audio = self.load_audio(bgm_lookup[module_id])
                 module_mixed = self.overlay_bgm(module_voice, bgm_audio, bgm_volume_db=bgm_volume)
-                print(f"    Mixed with BGM at {bgm_volume}dB")
+                emotion_info = f" ({module_emotion})" if module_emotion else ""
+                print(f"    Mixed with BGM at {bgm_volume}dB{emotion_info}")
             else:
                 module_mixed = module_voice
                 print(f"    No BGM available")
@@ -447,12 +532,17 @@ class AudioMixer:
             else:
                 final_audio = self.crossfade(final_audio, segment, duration_ms=500)
 
-        # Final fadeout
+        # ALWAYS apply final fadeout (guaranteed, not metadata-dependent)
+        # This prevents abrupt endings which is a known quality issue
         final_trans = self.get_transition_metadata(module_ids[-1] if module_ids else 4, None)
         if final_trans and final_trans.get("transition_type") == "fade_out":
             fadeout_ms = final_trans.get("duration_ms", 3000)
-            print(f"  Applying final fadeout ({fadeout_ms}ms)")
-            final_audio = self.fade_out(final_audio, fadeout_ms)
+        else:
+            # Default fadeout even if no metadata
+            fadeout_ms = 3000
+
+        print(f"  Applying final fadeout ({fadeout_ms}ms)")
+        final_audio = self.fade_out(final_audio, fadeout_ms)
 
         # Normalize and export
         final_audio = final_audio.normalize()
@@ -468,9 +558,16 @@ class AudioMixer:
         return str(output_path)
 
     def _process_hook_sentences(self, hook_sentences: List[dict]) -> AudioSegment:
-        """Process hook sentences with per-sentence intensity boost."""
+        """Process hook sentences with per-sentence intensity boost and dynamic pacing."""
         hook_meta = self.design_metadata.get("hook", {}) if self.design_metadata else {}
         pause_after = hook_meta.get("vocal_parameters", {}).get("pause_after_ms", 2000)
+
+        # Get hook emotion for dynamic pacing
+        hook_emotion = None
+        if hook_sentences and hook_sentences[0].get("emotion"):
+            hook_emotion = hook_sentences[0]["emotion"]
+        elif hook_meta:
+            hook_emotion = hook_meta.get("emotion", "intrigue")
 
         processed = []
         for sent in hook_sentences:
@@ -482,9 +579,12 @@ class AudioMixer:
 
             processed.append(sent_audio)
 
-        hook_audio = self.concatenate_sentences(processed, pause_between_ms=350)
+        # Use emotion-based pause duration for hook sentences
+        hook_audio = self.concatenate_sentences(processed, emotion=hook_emotion)
         hook_audio = hook_audio + AudioSegment.silent(duration=pause_after)
-        print(f"    Hook processed with 350ms sentence pauses, {pause_after}ms pause after")
+
+        pause_ms = get_pause_for_emotion(hook_emotion or "intrigue", "between_sentences")
+        print(f"    Hook processed with {pause_ms}ms ({hook_emotion}) sentence pauses, {pause_after}ms pause after")
 
         return hook_audio
 

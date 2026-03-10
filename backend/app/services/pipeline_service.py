@@ -1,0 +1,705 @@
+"""
+Pipeline orchestration service.
+
+Wraps the existing Normal and Pro pipelines, handling job execution,
+progress tracking, and cancellation.
+"""
+
+import asyncio
+import sys
+from pathlib import Path
+from typing import Dict, Optional, Any
+
+# Add project root to path for importing existing modules
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from pipelines.normal_pipeline import NormalPipeline
+from pipelines.pro_pipeline import ProPipeline, ProConfig, UltraConfig
+from utils.progress_stream import ProgressStream
+from utils.smart_input_handler import SmartInputHandler, SmartInput
+
+from ..models.enums import JobStatus, PipelineMode, GenerationPhase
+from ..models.requests import GenerationRequest
+from ..config import get_settings
+from .job_manager import JobManager
+from .progress_adapter import adapter_manager, ProgressUpdate as AdapterProgressUpdate
+from .trailer_service import TrailerService
+from ..logging_config import get_logger
+
+logger = get_logger("pipeline")
+
+
+class PipelineService:
+    """
+    Orchestrates pipeline execution.
+
+    Wraps the existing NormalPipeline and ProPipeline classes,
+    providing async job execution with progress tracking.
+
+    Attributes:
+        output_dir: Directory for output files
+        job_manager: JobManager for state updates
+        file_service: FileService for resolving uploaded file paths
+        _running_tasks: Dictionary of running asyncio tasks
+    """
+
+    def __init__(
+        self,
+        output_dir: Path,
+        job_manager: JobManager,
+        file_service=None,
+    ):
+        """
+        Initialize the pipeline service.
+
+        Args:
+            output_dir: Directory for output files.
+            job_manager: JobManager instance for state updates.
+            file_service: FileService instance for resolving file paths.
+        """
+        self.output_dir = output_dir
+        self.job_manager = job_manager
+        self.file_service = file_service
+        self._running_tasks: Dict[str, asyncio.Task] = {}
+
+    # Phase-level timeout defaults (seconds)
+    PHASE_TIMEOUTS = {
+        "content_prep": 120,     # 2 min for content extraction/generation
+        "scripting": 180,        # 3 min for script enhancement + review
+        "asset_generation": 360, # 6 min for TTS + BGM + Images
+        "mixing": 120,           # 2 min for audio mixing
+        "video_assembly": 120,   # 2 min for video assembly
+    }
+
+    async def run_job(
+        self,
+        job_id: str,
+        request: GenerationRequest,
+    ) -> None:
+        """
+        Run a generation job.
+
+        This method is called as a background task. It handles the full
+        job lifecycle including setup, execution, and cleanup. Uses
+        phase-level timeouts instead of a single global timeout to avoid
+        killing jobs that are 95% complete.
+
+        Args:
+            job_id: Unique job identifier.
+            request: Generation request with parameters.
+        """
+        try:
+            # Mark job as running
+            self.job_manager.start_job(job_id)
+
+            # Update progress
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.INITIALIZING,
+                message="Initializing pipeline...",
+                progress_percent=0,
+            )
+
+            await self._execute_pipeline(job_id, request)
+
+        except asyncio.CancelledError:
+            self.job_manager.cancel_job(job_id)
+        except Exception as e:
+            logger.error("Job %s failed: %s", job_id, e, exc_info=True)
+            self.job_manager.fail_job(job_id, str(e))
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ERROR,
+                message=f"Error: {e}",
+                progress_percent=0,
+            )
+        finally:
+            # Cleanup
+            if job_id in self._running_tasks:
+                del self._running_tasks[job_id]
+
+            # Persist completed/failed/cancelled jobs to database
+            try:
+                await self.job_manager.persist_pending_jobs()
+            except Exception as persist_error:
+                logger.warning("Failed to persist job %s: %s", job_id, persist_error)
+
+    async def _execute_pipeline(
+        self,
+        job_id: str,
+        request: GenerationRequest,
+    ) -> None:
+        """
+        Execute the pipeline with phase-level timeouts.
+
+        Each phase (content prep, pipeline execution) has its own timeout.
+        On timeout, partial results are saved and returned rather than
+        losing all progress.
+
+        Args:
+            job_id: Unique job identifier.
+            request: Generation request with parameters.
+        """
+        # Phase 1: Prepare content (with timeout)
+        try:
+            content = await asyncio.wait_for(
+                self._prepare_content(job_id, request),
+                timeout=self.PHASE_TIMEOUTS["content_prep"],
+            )
+        except asyncio.TimeoutError:
+            self.job_manager.fail_job(
+                job_id,
+                "Content preparation timed out. Try a smaller input file."
+            )
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ERROR,
+                message="Content preparation timed out.",
+                progress_percent=5,
+            )
+            return
+
+        if not content:
+            return  # Job failed during preparation
+
+        # Check for cancellation
+        if self.job_manager.is_cancellation_requested(job_id):
+            self.job_manager.cancel_job(job_id)
+            return
+
+        # Phase 2: Run pipeline (with generous timeout for full pipeline)
+        pipeline_timeout = (
+            self.PHASE_TIMEOUTS["scripting"]
+            + self.PHASE_TIMEOUTS["asset_generation"]
+            + self.PHASE_TIMEOUTS["mixing"]
+            + self.PHASE_TIMEOUTS["video_assembly"]
+        )
+
+        try:
+            if request.mode == "ultra":
+                result = await asyncio.wait_for(
+                    self._run_ultra_pipeline(job_id, content, request),
+                    timeout=pipeline_timeout,
+                )
+            elif request.mode == "pro":
+                result = await asyncio.wait_for(
+                    self._run_pro_pipeline(job_id, content, request),
+                    timeout=pipeline_timeout,
+                )
+            else:
+                result = await asyncio.wait_for(
+                    self._run_normal_pipeline(job_id, content),
+                    timeout=pipeline_timeout,
+                )
+        except asyncio.TimeoutError:
+            timeout_minutes = pipeline_timeout / 60
+            error_msg = (
+                f"Pipeline timed out after {timeout_minutes:.0f} minutes. "
+                f"Partial results may be available in the output directory."
+            )
+            self.job_manager.fail_job(job_id, error_msg)
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ERROR,
+                message=error_msg,
+                progress_percent=0,
+            )
+            return
+
+        # Check for cancellation
+        if self.job_manager.is_cancellation_requested(job_id):
+            self.job_manager.cancel_job(job_id)
+            return
+
+        # Complete job — accept partial success (output_path present even if not fully successful)
+        if result and (result.get("success") or result.get("output_path")):
+            self.job_manager.complete_job(job_id, result)
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.COMPLETE,
+                message="Generation complete!",
+                progress_percent=100,
+            )
+        else:
+            error_msg = result.get("error", "Unknown error") if result else "Pipeline failed"
+            self.job_manager.fail_job(job_id, error_msg)
+
+    async def _update_progress(
+        self,
+        job_id: str,
+        phase: GenerationPhase,
+        message: str,
+        progress_percent: float = 0.0,
+        current_step: int = 0,
+        total_steps: int = 0,
+        eta_seconds: Optional[float] = None,
+        preview: Optional[str] = None,
+        details: Optional[Dict] = None,
+    ) -> None:
+        """
+        Update progress in both the job manager and the WebSocket adapter.
+
+        Args:
+            job_id: Job identifier.
+            phase: Current generation phase.
+            message: Status message.
+            progress_percent: Overall progress (0-100).
+            current_step: Current step number.
+            total_steps: Total steps.
+            eta_seconds: Estimated time remaining.
+            preview: Preview content.
+            details: Additional details.
+        """
+        # Update job manager (persisted state)
+        self.job_manager.update_progress(
+            job_id=job_id,
+            phase=phase,
+            message=message,
+            progress_percent=progress_percent,
+            current_step=current_step,
+            total_steps=total_steps,
+            eta_seconds=eta_seconds,
+            preview=preview,
+            details=details,
+        )
+
+        # Push to WebSocket adapter for real-time streaming
+        try:
+            adapter = await adapter_manager.get_adapter(job_id)
+            adapter_update = AdapterProgressUpdate(
+                job_id=job_id,
+                phase=phase,
+                message=message,
+                progress_percent=progress_percent,
+                current_step=current_step,
+                total_steps=total_steps,
+                eta_seconds=eta_seconds,
+                preview=preview,
+                details=details,
+            )
+            adapter._queue.put_nowait(adapter_update)
+        except Exception:
+            pass  # Don't fail pipeline if WebSocket push fails
+
+    async def _prepare_content(
+        self,
+        job_id: str,
+        request: GenerationRequest,
+    ) -> Optional[Any]:
+        """
+        Prepare content for pipeline execution.
+
+        Uses SmartInputHandler to process prompt and/or files.
+
+        Args:
+            job_id: Job identifier for progress updates.
+            request: Generation request.
+
+        Returns:
+            ExtractedContent object or None if preparation fails.
+        """
+        try:
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ANALYZING,
+                message="Analyzing input...",
+                progress_percent=5,
+            )
+
+            # Resolve uploaded file paths
+            files = []
+            if request.file_ids and self.file_service:
+                for file_id in request.file_ids:
+                    file_path = self.file_service.get_file_path(file_id)
+                    if file_path:
+                        files.append(str(file_path))
+
+            smart_input = SmartInput(
+                prompt=request.prompt,
+                files=files,
+                guidance=request.guidance,
+                target_duration_minutes=request.target_duration_minutes,
+            )
+
+            # Process input (sync call wrapped in executor)
+            handler = SmartInputHandler()
+            length = "standard" if request.mode == "pro" else "short"
+            content = await handler.process_async(
+                smart_input,
+                length=length,
+                target_duration_minutes=request.target_duration_minutes
+            )
+
+            await self._update_progress(
+                job_id=job_id,
+                phase=GenerationPhase.ANALYZING,
+                message="Content prepared",
+                progress_percent=10,
+                preview=content.text[:200] if content.text else None,
+            )
+
+            # Pass conversational_style flag to downstream pipeline
+            if content.metadata is None:
+                content.metadata = {}
+            content.metadata["conversational_style"] = request.conversational_style
+
+            return content
+
+        except Exception as e:
+            self.job_manager.fail_job(job_id, f"Content preparation failed: {e}")
+            return None
+
+    def _create_on_script_ready_callback(self, job_id: str):
+        """
+        Create callback for when script is ready.
+
+        Launches trailer generation as fire-and-forget task.
+
+        Args:
+            job_id: Job identifier.
+
+        Returns:
+            Callback function that receives (pipeline_job_id, script).
+        """
+        def on_script_ready(pipeline_job_id: str, script: Dict[str, Any]):
+            """Fire-and-forget trailer generation."""
+            logger.info(f"Script ready for job {job_id}, launching trailer generation")
+            asyncio.create_task(
+                self._generate_trailer_preview(job_id, script)
+            )
+
+        return on_script_ready
+
+    async def _generate_trailer_preview(self, job_id: str, script: Dict[str, Any]):
+        """
+        Generate and broadcast trailer preview.
+
+        This runs as a fire-and-forget task. Failures are logged but
+        do not affect the main pipeline.
+
+        Args:
+            job_id: Job identifier.
+            script: Enhanced script dictionary.
+        """
+        try:
+            trailer_service = TrailerService(job_id, self.output_dir)
+
+            # Timeout for trailer generation (TTS ~15-20s + image ~5s + mix ~2s)
+            result = await asyncio.wait_for(
+                trailer_service.generate_trailer(script),
+                timeout=45.0
+            )
+
+            if result.success:
+                # Store trailer image path in job metadata for main pipeline to use
+                if result.image_path:
+                    job = self.job_manager.get_job(job_id)
+                    if job:
+                        if job.result is None:
+                            job.result = {}
+                        job.result["trailer_image_path"] = result.image_path
+                        logger.info(f"Stored trailer image path for job {job_id}: {result.image_path}")
+
+                # Broadcast trailer ready via WebSocket
+                await self._broadcast_trailer_ready(job_id, result)
+                logger.info(f"Trailer ready for job {job_id}: {result.video_path or result.audio_path}")
+            else:
+                logger.warning(f"Trailer generation failed for job {job_id}: {result.error}")
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Trailer generation timed out for job {job_id}")
+        except Exception as e:
+            logger.warning(f"Trailer generation error for job {job_id}: {e}")
+
+    async def _broadcast_trailer_ready(self, job_id: str, result):
+        """
+        Broadcast trailer ready message via WebSocket.
+
+        Args:
+            job_id: Job identifier.
+            result: TrailerResult with paths and duration.
+        """
+        from ..websockets.progress import manager
+
+        # Determine URL path for trailer
+        trailer_url = f"/api/trailer/{job_id}"
+
+        message = {
+            "type": "trailer_ready",
+            "job_id": job_id,
+            "trailer_url": trailer_url,
+            "duration_seconds": result.duration_seconds,
+        }
+
+        await manager.broadcast(job_id, message)
+
+    def _create_progress_callback(self, job_id: str, adapter):
+        """
+        Create a progress callback for pipeline execution.
+
+        The callback updates both the job manager (for persistence) and
+        the WebSocket adapter (for real-time streaming).
+
+        Args:
+            job_id: Job identifier.
+            adapter: WebSocket adapter for real-time updates.
+
+        Returns:
+            Callback function for progress updates.
+        """
+        def progress_callback(update):
+            self.job_manager.update_progress(
+                job_id=job_id,
+                phase=GenerationPhase(update.phase.value),
+                message=update.message,
+                progress_percent=update.progress_percent,
+                current_step=update.current_step,
+                total_steps=update.total_steps,
+                eta_seconds=update.eta_seconds,
+                preview=update.preview,
+                details=update.details,
+            )
+            # Push to WebSocket adapter (on_progress is sync-safe)
+            try:
+                adapter.on_progress(update)
+            except Exception:
+                pass  # Don't fail pipeline if adapter push fails
+
+        return progress_callback
+
+    def _convert_result_to_dict(
+        self,
+        result,
+        include_review_history: bool = False,
+        config=None,
+    ) -> Dict:
+        """
+        Convert a pipeline result to a dictionary.
+
+        Args:
+            result: Pipeline result object.
+            include_review_history: Include review history (Pro mode).
+            config: Pro config to include (if provided).
+
+        Returns:
+            Result as a dictionary.
+        """
+        result_dict = {
+            "success": result.success,
+            "output_path": result.output_path,
+            "audio_output_path": result.audio_output_path,
+            "script": result.script,
+            "tts_files": [
+                {"id": f"tts_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "tts"}
+                for i, f in enumerate(result.tts_files)
+            ] if result.tts_files else [],
+            "bgm_files": [
+                {"id": f"bgm_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "bgm"}
+                for i, f in enumerate(result.bgm_files)
+            ] if result.bgm_files else [],
+            "image_files": [
+                {"id": f"img_{i}", "filename": f.get("filename", ""), "path": f.get("path", ""), "type": "image"}
+                for i, f in enumerate(result.image_files)
+            ] if result.image_files else [],
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+            "quality_report": result.quality_report,
+        }
+
+        if include_review_history:
+            result_dict["review_history"] = result.review_history
+
+        if config:
+            result_dict["config_used"] = config.to_dict()
+
+        return result_dict
+
+    async def _run_normal_pipeline(
+        self,
+        job_id: str,
+        content: Any,
+    ) -> Optional[Dict]:
+        """
+        Run the Normal pipeline.
+
+        Args:
+            job_id: Job identifier for progress updates.
+            content: Prepared content.
+
+        Returns:
+            Pipeline result dictionary.
+        """
+        try:
+            # Get adapter while still in async context (thread-safe for sync callbacks)
+            adapter = await adapter_manager.get_adapter(job_id)
+            progress_callback = self._create_progress_callback(job_id, adapter)
+            progress = ProgressStream(callback=progress_callback)
+
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
+            # Run pipeline (pass job_id to isolate outputs per job)
+            pipeline = NormalPipeline(job_id=job_id)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready
+            )
+
+            return self._convert_result_to_dict(result)
+
+        except Exception as e:
+            logger.error("Normal pipeline failed: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _run_pro_pipeline(
+        self,
+        job_id: str,
+        content: Any,
+        request: GenerationRequest,
+    ) -> Optional[Dict]:
+        """
+        Run the Pro pipeline.
+
+        Args:
+            job_id: Job identifier for progress updates.
+            content: Prepared content.
+            request: Original request with config.
+
+        Returns:
+            Pipeline result dictionary.
+        """
+        try:
+            # Create config
+            config = ProConfig()
+            if request.config:
+                config = ProConfig.from_dict(request.config)
+
+            # Get adapter while still in async context (thread-safe for sync callbacks)
+            adapter = await adapter_manager.get_adapter(job_id)
+            progress_callback = self._create_progress_callback(job_id, adapter)
+            # Initialize progress stream in Pro mode for correct phase weights
+            progress = ProgressStream(callback=progress_callback, mode="pro")
+
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
+            # Construct expected trailer image path for reuse in main pipeline
+            # This matches the path used in trailer_service.py
+            trailer_image_path = str(self.output_dir / job_id / "trailer" / f"trailer_image_{job_id}.png")
+
+            # Run pipeline
+            pipeline = ProPipeline(config=config)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready,
+                trailer_image_path=trailer_image_path
+            )
+
+            return self._convert_result_to_dict(
+                result,
+                include_review_history=True,
+                config=config,
+            )
+
+        except Exception as e:
+            logger.error("Pro pipeline failed: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _run_ultra_pipeline(
+        self,
+        job_id: str,
+        content: Any,
+        request: GenerationRequest,
+    ) -> Optional[Dict]:
+        """
+        Run the Ultra pipeline.
+
+        Ultra mode uses the ProPipeline with UltraConfig for premium quality:
+        - Full director review loop (3 rounds)
+        - 16 narrative images
+        - 9-segment daisy-chain BGM
+        - VAD-based ducking
+
+        Args:
+            job_id: Job identifier for progress updates.
+            content: Prepared content.
+            request: Original request with config.
+
+        Returns:
+            Pipeline result dictionary.
+        """
+        try:
+            # Create UltraConfig (with overrides from request)
+            config = UltraConfig()
+            if request.config:
+                config = UltraConfig.from_dict(request.config)
+
+            # Get adapter while still in async context (thread-safe for sync callbacks)
+            adapter = await adapter_manager.get_adapter(job_id)
+            progress_callback = self._create_progress_callback(job_id, adapter)
+            # Initialize progress stream in Ultra mode for correct phase weights
+            progress = ProgressStream(callback=progress_callback, mode="ultra")
+
+            # Create trailer callback for fire-and-forget trailer generation
+            on_script_ready = self._create_on_script_ready_callback(job_id)
+
+            # Run pipeline with UltraConfig (ProPipeline accepts both ProConfig and UltraConfig)
+            # Convert UltraConfig to ProConfig-compatible for pipeline execution
+            pro_config = ProConfig(
+                director_review=config.director_review,
+                max_review_rounds=config.max_review_rounds,
+                approval_threshold=config.approval_threshold,
+                voice_preset=config.voice_preset,
+                apply_voice_styles=config.apply_voice_styles,
+                custom_pronunciations=config.custom_pronunciations,
+                music_genre=config.music_genre,
+                bgm_segments=config.bgm_segments,
+                daisy_chain=config.daisy_chain,
+                bgm_intelligent=config.bgm_intelligent,
+                image_count=config.image_count,
+                image_style=config.image_style,
+                tts_sentence_level=config.tts_sentence_level,
+                vad_ducking=config.vad_ducking,
+                speaker_format=config.speaker_format,
+                manual_speakers=config.manual_speakers,
+                voice_overrides=config.voice_overrides,
+                emotion_voice_sync=config.emotion_voice_sync,
+                emotion_image_alignment=config.emotion_image_alignment,
+                emotion_validation=config.emotion_validation,
+            )
+            # Construct expected trailer image path for reuse in main pipeline
+            trailer_image_path = str(self.output_dir / job_id / "trailer" / f"trailer_image_{job_id}.png")
+
+            pipeline = ProPipeline(config=pro_config)
+            result = await pipeline.run_with_content(
+                content,
+                progress=progress,
+                on_script_ready=on_script_ready,
+                trailer_image_path=trailer_image_path
+            )
+
+            return self._convert_result_to_dict(
+                result,
+                include_review_history=True,
+                config=pro_config,
+            )
+
+        except Exception as e:
+            logger.error("Ultra pipeline failed: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def cancel_job(self, job_id: str) -> None:
+        """
+        Cancel a running job.
+
+        Args:
+            job_id: Job identifier to cancel.
+        """
+        self.job_manager.request_cancellation(job_id)
+
+        # Cancel the asyncio task if running
+        task = self._running_tasks.get(job_id)
+        if task and not task.done():
+            task.cancel()

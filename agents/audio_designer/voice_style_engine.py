@@ -6,19 +6,24 @@ Applies different delivery characteristics to each module while keeping
 the same voice consistent throughout. Uses post-processing to simulate
 different narrator styles.
 
-Styles:
+Module Styles:
 - Hook: The Intriguer - compelling, slightly fast, presence boost
 - Module 1: The Biographer - warm, nostalgic, measured pace
 - Module 2: The Announcer - punchy, triumphant, bright
 - Module 3: The Punk Chronicler - raw, urgent, electric
 - Module 4: The Sage - authoritative, reflective, reverberant
+
+Emotion Modifiers:
+- Applies subtle emotion-based adjustments on top of module styles
+- EQ boosts, reverb, compression, and volume adjustments per emotion
 """
 
 from pydub import AudioSegment
 from pydub.effects import low_pass_filter, high_pass_filter, compress_dynamic_range
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from config.voice_styles import VOICE_STYLES
+from config.emotion_voice_mapping import get_emotion_style_modifiers, EMOTION_STYLE_MODIFIERS
 
 
 class VoiceStyleEngine:
@@ -236,6 +241,149 @@ class VoiceStyleEngine:
 
         return result
 
+    def apply_emotion_modifiers(
+        self,
+        audio: AudioSegment,
+        emotion: str
+    ) -> AudioSegment:
+        """
+        Apply emotion-based micro-adjustments on top of module style.
+
+        These are subtle adjustments that respond to the emotional content
+        of each chunk/sentence, layered on top of the module's base style.
+
+        Args:
+            audio: Input audio segment (already has module style applied)
+            emotion: Emotion name (e.g., 'wonder', 'tension', 'triumph')
+
+        Returns:
+            Audio segment with emotion modifiers applied
+        """
+        modifiers = get_emotion_style_modifiers(emotion)
+
+        if not modifiers or emotion.lower() == "neutral":
+            return audio
+
+        result = audio
+        applied = []
+
+        # 1. Apply EQ boost if specified and different from what module might have
+        eq_boost = modifiers.get("eq_boost")
+        if eq_boost:
+            result = self.apply_eq(result, eq_boost)
+            applied.append(f"EQ: {eq_boost}")
+
+        # 2. Apply compression if specified
+        compression = modifiers.get("compression")
+        if compression:
+            result = self.apply_compression(result, compression)
+            applied.append(f"Compression: {compression}")
+
+        # 3. Apply reverb if specified
+        reverb_amount = modifiers.get("reverb", 0)
+        if reverb_amount > 0:
+            # Scale reverb decay based on amount (0.0-1.0 -> 200-1000ms)
+            decay_ms = int(200 + (reverb_amount * 800))
+            result = self.apply_reverb(result, decay_ms)
+            applied.append(f"Reverb: {reverb_amount}")
+
+        # 4. Apply volume adjustment
+        volume_adjust = modifiers.get("volume_adjust_db", 0)
+        if volume_adjust != 0:
+            result = result + volume_adjust
+            applied.append(f"Volume: {volume_adjust:+}dB")
+
+        if applied:
+            print(f"      Emotion modifiers ({emotion}): {', '.join(applied)}")
+
+        return result
+
+    def apply_style_with_emotion(
+        self,
+        audio: AudioSegment,
+        style_key: str,
+        emotion: Optional[str] = None
+    ) -> AudioSegment:
+        """
+        Apply both module style and emotion modifiers to audio.
+
+        Args:
+            audio: Input audio segment
+            style_key: Module style key (e.g., 'hook', 'module_1')
+            emotion: Optional emotion for additional modifiers
+
+        Returns:
+            Styled audio segment
+        """
+        # First apply module style
+        result = self.apply_style(audio, style_key)
+
+        # Then apply emotion modifiers if specified
+        if emotion and emotion.lower() != "neutral":
+            result = self.apply_emotion_modifiers(result, emotion)
+
+        return result
+
+    def apply_styles_to_all(
+        self,
+        tts_results: List[Dict[str, Any]],
+        apply_emotion: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply voice styles to all TTS results.
+
+        Args:
+            tts_results: List of TTS file metadata with paths
+            apply_emotion: Whether to apply emotion-based modifiers
+
+        Returns:
+            Updated list with styled audio paths
+        """
+        print("\n" + "=" * 50)
+        print("APPLYING VOICE STYLES")
+        print("=" * 50)
+
+        styled_results = []
+
+        for tts in tts_results:
+            file_type = tts.get("type", "")
+            path = tts.get("path")
+
+            if not path:
+                styled_results.append(tts)
+                continue
+
+            # Determine style key
+            if "hook" in file_type:
+                style_key = "hook"
+            elif "chunk" in file_type:
+                module_id = tts.get("module_id", 1)
+                style_key = f"module_{module_id}"
+            else:
+                style_key = "hook"  # Default
+
+            # Load audio
+            try:
+                audio = AudioSegment.from_file(path)
+            except Exception as e:
+                print(f"  Error loading {path}: {e}")
+                styled_results.append(tts)
+                continue
+
+            # Apply style (and optionally emotion modifiers)
+            emotion = tts.get("emotion", "neutral") if apply_emotion else "neutral"
+            styled_audio = self.apply_style_with_emotion(audio, style_key, emotion)
+
+            # Save styled audio (overwrite original)
+            styled_audio.export(path, format="wav")
+
+            styled_results.append(tts)
+
+        print(f"\n  Styled {len(styled_results)} audio files")
+        print("=" * 50)
+
+        return styled_results
+
     def print_style_summary(self):
         """Print a summary of all voice styles."""
         print("\n" + "=" * 60)
@@ -249,7 +397,23 @@ class VoiceStyleEngine:
             print(f"  EQ: {style['eq']} | Compression: {style['compression']}")
             print(f"  Reverb: {'Yes' if style['reverb'] else 'No'}")
 
+    def print_emotion_modifiers_summary(self):
+        """Print a summary of all emotion modifiers."""
+        print("\n" + "=" * 60)
+        print("EMOTION MODIFIERS SUMMARY")
+        print("=" * 60)
+
+        for emotion, modifiers in EMOTION_STYLE_MODIFIERS.items():
+            if emotion == "neutral":
+                continue
+            print(f"\n{emotion.upper()}: {modifiers.get('description', '')}")
+            print(f"  EQ: {modifiers.get('eq_boost', 'none')}")
+            print(f"  Reverb: {modifiers.get('reverb', 0)}")
+            print(f"  Compression: {modifiers.get('compression', 'none')}")
+            print(f"  Volume: {modifiers.get('volume_adjust_db', 0):+}dB")
+
 
 if __name__ == "__main__":
     engine = VoiceStyleEngine()
     engine.print_style_summary()
+    engine.print_emotion_modifiers_summary()
